@@ -10,6 +10,7 @@
   --primary: #1a1a1a;
   --primary-hover: #333333;
   --muted: #737373;
+  --nav-active-bg: #f0f0eb;
 }
 
 .dark {
@@ -22,6 +23,7 @@
   --primary: #f5f5f0;
   --primary-hover: #e5e5e0;
   --muted: #a3a3a3;
+  --nav-active-bg: #252525;
 }
 
 @theme inline {

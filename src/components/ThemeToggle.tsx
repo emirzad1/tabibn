@@ -2,13 +2,17 @@
 
 import { useTheme } from "./ThemeProvider";
 
-export function ThemeToggle() {
+interface ThemeToggleProps {
+    fixed?: boolean;
+}
+
+export function ThemeToggle({ fixed = true }: ThemeToggleProps) {
     const { theme, toggleTheme } = useTheme();
 
     return (
         <button
             onClick={toggleTheme}
-            className="fixed top-6 right-6 p-3 rounded-full transition-all duration-300 hover:scale-110"
+            className={`${fixed ? "fixed top-6 right-6" : ""} p-3 rounded-full transition-all duration-300 hover:scale-110`}
             style={{
                 backgroundColor: "var(--card-bg)",
                 border: "1px solid var(--card-border)",

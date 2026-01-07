@@ -1,18 +1,62 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useTheme } from "@/components/ThemeProvider";
 
+/**
+ * PHONE AUTHENTICATION PAGE
+ * 
+ * BACKEND INTEGRATION NOTES:
+ * -------------------------
+ * 1. When user clicks "Continue" with a valid phone number:
+ *    - Send phone number to backend to initiate OTP
+ *    - Backend should send SMS with OTP code
+ *    - On success: redirect to /verify page
+ *    - On failure: show error message
+ * 
+ * Current Implementation:
+ * - Frontend only, accepts any valid phone number (digits only)
+ * - Routes directly to /verify page without backend call
+ * - Replace console.log with actual API call when backend is ready
+ */
+
 export default function AuthPage() {
+  const router = useRouter();
   const [phoneNumber, setPhoneNumber] = useState("");
   const [countryCode, setCountryCode] = useState("+93");
   const { theme } = useTheme();
 
   const handleContinue = (e: React.FormEvent) => {
     e.preventDefault();
-    // TODO: Implement phone auth logic
-    console.log("Phone:", countryCode + phoneNumber);
+
+    // Validate: only proceed if phone number contains only digits and is not empty
+    if (!phoneNumber || !/^\d+$/.test(phoneNumber)) {
+      return; // Do nothing if invalid
+    }
+
+    const fullPhoneNumber = countryCode + phoneNumber;
+
+    /**
+     * TODO: BACKEND INTEGRATION
+     * Replace this with actual API call to send OTP:
+     * 
+     * try {
+     *   const response = await sendOTP(fullPhoneNumber);
+     *   if (response.success) {
+     *     router.push(`/verify?phone=${encodeURIComponent(fullPhoneNumber)}`);
+     *   } else {
+     *     setError("Failed to send OTP. Please try again.");
+     *   }
+     * } catch (error) {
+     *   setError("Something went wrong. Please try again.");
+     * }
+     */
+
+    console.log("Sending OTP to:", fullPhoneNumber);
+    // Route to OTP verification page with phone number
+    router.push(`/verify?phone=${encodeURIComponent(fullPhoneNumber)}`);
   };
 
   return (
