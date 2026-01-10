@@ -1,53 +1,57 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import { useTheme } from "@/components/ThemeProvider";
 
 /**
- * OTP VERIFICATION PAGE
+ * ENHANCED OTP VERIFICATION PAGE
  * 
- * BACKEND INTEGRATION NOTES:
- * -------------------------
- * 1. This page receives the phone number via URL query parameter (?phone=...)
- * 2. When the page loads, the backend should have already sent an OTP to this phone number
- * 3. The handleVerify function should:
- *    - Send the entered OTP code to the backend for verification
- *    - On success: Check if user exists
- *      - New user: redirect to /setup for profile creation
- *      - Existing user: redirect to /dashboard
- *    - On failure: show error message and allow retry
- * 4. The handleResend function should:
- *    - Call backend to resend OTP to the same phone number
- *    - Implement rate limiting (e.g., 60 second cooldown)
- * 
- * Current Implementation:
- * - Frontend only, routes to profile setup on any 6-digit code
- * - Replace console.log with actual API calls when backend is ready
+ * Premium features:
+ * - Auto-focus between inputs
+ * - Auto-submit when complete
+ * - Paste support
+ * - Countdown timer for resend
+ * - Error shake animation
  */
 
-export default function OTPVerificationPage() {
+function OTPContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
-    const phoneNumber = searchParams.get("phone") || "";
-    const { theme } = useTheme();
+    const phone = searchParams.get("phone") || "";
+    const { theme, toggleTheme } = useTheme();
 
-    const [otp, setOtp] = useState<string[]>(["", "", "", "", "", ""]);
+    const [otp, setOtp] = useState(["", "", "", "", "", ""]);
     const [error, setError] = useState("");
+    const [isVerifying, setIsVerifying] = useState(false);
+    const [countdown, setCountdown] = useState(60);
+    const [canResend, setCanResend] = useState(false);
     const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-    // Focus first input on mount
+    // Countdown timer
     useEffect(() => {
-        inputRefs.current[0]?.focus();
-    }, []);
+        if (countdown > 0) {
+            const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+            return () => clearTimeout(timer);
+        } else {
+            setCanResend(true);
+        }
+    }, [countdown]);
 
+    // Auto-submit when all digits entered
+    useEffect(() => {
+        if (otp.every((digit) => digit !== "")) {
+            handleVerify();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [otp]);
+
+    // Handle input change
     const handleChange = (index: number, value: string) => {
-        // Only allow numbers
-        if (value && !/^\d$/.test(value)) return;
+        if (!/^\d*$/.test(value)) return;
 
         const newOtp = [...otp];
-        newOtp[index] = value;
+        newOtp[index] = value.slice(-1);
         setOtp(newOtp);
         setError("");
 
@@ -57,184 +61,241 @@ export default function OTPVerificationPage() {
         }
     };
 
+    // Handle backspace
     const handleKeyDown = (index: number, e: React.KeyboardEvent) => {
-        // Handle backspace - move to previous input
         if (e.key === "Backspace" && !otp[index] && index > 0) {
             inputRefs.current[index - 1]?.focus();
         }
     };
 
+    // Handle paste
     const handlePaste = (e: React.ClipboardEvent) => {
         e.preventDefault();
         const pastedData = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
-        if (pastedData) {
-            const newOtp = [...otp];
-            pastedData.split("").forEach((char, i) => {
-                if (i < 6) newOtp[i] = char;
-            });
-            setOtp(newOtp);
-            // Focus last filled input or the next empty one
-            const lastIndex = Math.min(pastedData.length, 5);
-            inputRefs.current[lastIndex]?.focus();
+        if (pastedData.length === 6) {
+            setOtp(pastedData.split(""));
+            inputRefs.current[5]?.focus();
         }
     };
 
-    const handleVerify = (e: React.FormEvent) => {
-        e.preventDefault();
-        const otpCode = otp.join("");
+    // Verify OTP
+    const handleVerify = async () => {
+        const code = otp.join("");
+        if (code.length !== 6) return;
 
-        if (otpCode.length !== 6) {
-            setError("Please enter the complete 6-digit code");
+        setIsVerifying(true);
+        setError("");
+
+        // TODO: Verify OTP via API
+        await new Promise((r) => setTimeout(r, 1000));
+
+        // Simulate verification (accept any 6-digit code for demo)
+        if (code === "000000") {
+            setError("Invalid verification code");
+            setIsVerifying(false);
+            // Shake animation handled by CSS
             return;
         }
 
-        /**
-         * TODO: BACKEND INTEGRATION
-         * Replace this with actual OTP verification API call:
-         * 
-         * try {
-         *   const response = await verifyOTP(phoneNumber, otpCode);
-         *   if (response.success) {
-         *     router.push("/dashboard");
-         *   } else {
-         *     setError("Invalid code. Please try again.");
-         *   }
-         * } catch (error) {
-         *   setError("Verification failed. Please try again.");
-         * }
-         */
-
-        console.log("Verifying OTP:", otpCode, "for phone:", phoneNumber);
-        // Route to profile setup page for new users
-        // TODO: Check if user exists - if yes, route to /dashboard instead
         router.push("/setup");
     };
 
-    const handleResend = () => {
-        /**
-         * TODO: BACKEND INTEGRATION
-         * Implement resend OTP functionality:
-         * - Call backend to resend OTP
-         * - Show success message
-         * - Implement cooldown timer (e.g., 60 seconds)
-         */
-        console.log("Resending OTP to:", phoneNumber);
-        alert("OTP resent! (This is a placeholder)");
+    // Resend OTP
+    const handleResend = async () => {
+        if (!canResend) return;
+        setCanResend(false);
+        setCountdown(60);
+        setOtp(["", "", "", "", "", ""]);
+        inputRefs.current[0]?.focus();
+        // TODO: Resend OTP via API
     };
 
-    const isComplete = otp.every(digit => digit !== "");
-
     return (
-        <main
-            className="min-h-screen flex items-center justify-center px-4"
-            style={{ backgroundColor: "var(--background)" }}
+        <div
+            className="min-h-screen flex items-center justify-center"
+            style={{ background: "var(--gradient-hero)" }}
         >
-            {/* Theme Toggle - Top Right Corner */}
-            <ThemeToggle />
-
-            {/* OTP Card */}
-            <div
-                className="w-full max-w-[456px] px-10 py-12 rounded-2xl"
+            {/* Theme Toggle */}
+            <button
+                onClick={toggleTheme}
+                className="fixed top-6 right-6 p-3 rounded-full transition-all hover:scale-110 z-50"
                 style={{
-                    backgroundColor: "var(--card-bg)",
+                    background: "var(--card-bg)",
                     border: "1px solid var(--card-border)",
-                    boxShadow: "0 4px 24px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)",
+                    boxShadow: "var(--card-shadow)",
                 }}
             >
-                {/* Logo - switches based on theme */}
-                <div className="flex justify-center mb-10">
-                    <img
-                        src={theme === "light" ? "/logodark.svg" : "/logolight.svg"}
-                        alt="Tabibn Logo"
-                        width={396}
-                        height={132}
-                        className="h-[132px] w-auto"
-                    />
-                </div>
+                {theme === "light" ? (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                    </svg>
+                ) : (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="12" r="5" />
+                        <line x1="12" y1="1" x2="12" y2="3" />
+                        <line x1="12" y1="21" x2="12" y2="23" />
+                    </svg>
+                )}
+            </button>
 
-                {/* Verification Text */}
-                <div className="text-center mb-8">
-                    <h1
-                        className="text-2xl font-semibold mb-2"
-                        style={{ color: "var(--foreground)" }}
-                    >
-                        Verify Your Number
-                    </h1>
-                    <p
-                        className="text-sm"
-                        style={{ color: "var(--muted)" }}
-                    >
-                        Enter the 6-digit code sent to{" "}
-                        <span style={{ color: "var(--foreground)" }}>{phoneNumber}</span>
-                    </p>
-                </div>
-
-                {/* OTP Input Form */}
-                <form onSubmit={handleVerify}>
-                    <div className="mb-6">
-                        <div className="flex justify-center gap-3" onPaste={handlePaste}>
-                            {otp.map((digit, index) => (
-                                <input
-                                    key={index}
-                                    ref={(el) => { inputRefs.current[index] = el; }}
-                                    type="text"
-                                    inputMode="numeric"
-                                    maxLength={1}
-                                    value={digit}
-                                    onChange={(e) => handleChange(index, e.target.value)}
-                                    onKeyDown={(e) => handleKeyDown(index, e)}
-                                    className="w-12 h-14 text-center text-xl font-semibold rounded-lg outline-none transition-all duration-200 focus:ring-2 focus:ring-offset-1"
-                                    style={{
-                                        backgroundColor: "var(--input-bg)",
-                                        border: error ? "1px solid #ef4444" : "1px solid var(--input-border)",
-                                        color: "var(--foreground)",
-                                    }}
-                                />
-                            ))}
+            <div className="w-full max-w-md px-6">
+                <div
+                    className="p-8 rounded-2xl animate-scale-in"
+                    style={{
+                        background: "var(--card-bg)",
+                        border: "1px solid var(--card-border)",
+                        boxShadow: "0 8px 32px rgba(0, 0, 0, 0.08)",
+                    }}
+                >
+                    {/* Header */}
+                    <div className="text-center mb-8">
+                        <div
+                            className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
+                            style={{ background: "var(--primary-subtle)" }}
+                        >
+                            <svg
+                                width="32"
+                                height="32"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="var(--primary)"
+                                strokeWidth="2"
+                            >
+                                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                            </svg>
                         </div>
-                        {error && (
-                            <p className="text-center text-sm mt-3 text-red-500">{error}</p>
-                        )}
+                        <h1
+                            className="text-2xl font-bold mb-2"
+                            style={{ color: "var(--foreground)" }}
+                        >
+                            Verify Your Phone
+                        </h1>
+                        <p style={{ color: "var(--muted)" }}>
+                            We sent a 6-digit code to
+                        </p>
+                        <p
+                            className="font-semibold"
+                            style={{ color: "var(--foreground)" }}
+                        >
+                            {phone || "+93 700 123 456"}
+                        </p>
                     </div>
+
+                    {/* OTP Inputs */}
+                    <div
+                        className={`flex justify-center gap-3 mb-6 ${error ? "animate-shake" : ""}`}
+                        onPaste={handlePaste}
+                    >
+                        {otp.map((digit, index) => (
+                            <input
+                                key={index}
+                                ref={(el) => { inputRefs.current[index] = el; }}
+                                type="text"
+                                inputMode="numeric"
+                                maxLength={1}
+                                value={digit}
+                                onChange={(e) => handleChange(index, e.target.value)}
+                                onKeyDown={(e) => handleKeyDown(index, e)}
+                                className="w-12 h-14 text-center text-xl font-bold rounded-xl outline-none transition-all"
+                                style={{
+                                    background: "var(--input-bg)",
+                                    border: `2px solid ${error ? "var(--accent-danger)" : digit ? "var(--primary)" : "var(--input-border)"}`,
+                                    color: "var(--foreground)",
+                                }}
+                            />
+                        ))}
+                    </div>
+
+                    {/* Error Message */}
+                    {error && (
+                        <p
+                            className="text-center text-sm mb-4"
+                            style={{ color: "var(--accent-danger)" }}
+                        >
+                            {error}
+                        </p>
+                    )}
 
                     {/* Verify Button */}
                     <button
-                        type="submit"
-                        disabled={!isComplete}
-                        className="w-full py-3 rounded-lg text-sm font-medium transition-all duration-200 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={handleVerify}
+                        disabled={otp.some((d) => !d) || isVerifying}
+                        className="w-full py-3.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50"
                         style={{
-                            backgroundColor: "var(--primary)",
-                            color: "var(--background)",
+                            background: "var(--gradient-primary)",
+                            color: "white",
                         }}
                     >
-                        Verify
+                        {isVerifying ? (
+                            <span className="flex items-center justify-center gap-2">
+                                <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                </svg>
+                                Verifying...
+                            </span>
+                        ) : (
+                            "Verify Code"
+                        )}
                     </button>
-                </form>
 
-                {/* Resend Link */}
-                <p
-                    className="text-sm text-center mt-6"
-                    style={{ color: "var(--muted)" }}
-                >
-                    Didn&apos;t receive the code?{" "}
+                    {/* Resend Section */}
+                    <div className="text-center mt-6">
+                        {canResend ? (
+                            <button
+                                onClick={handleResend}
+                                className="text-sm font-medium transition-all hover:opacity-80"
+                                style={{ color: "var(--primary)" }}
+                            >
+                                Resend Code
+                            </button>
+                        ) : (
+                            <p className="text-sm" style={{ color: "var(--muted)" }}>
+                                Resend code in{" "}
+                                <span style={{ color: "var(--primary)", fontWeight: 600 }}>
+                                    {countdown}s
+                                </span>
+                            </p>
+                        )}
+                    </div>
+
+                    {/* Back Link */}
                     <button
-                        onClick={handleResend}
-                        className="underline hover:opacity-80"
-                        style={{ color: "var(--foreground)" }}
+                        onClick={() => router.push("/")}
+                        className="w-full mt-4 py-2 text-sm transition-all hover:opacity-80"
+                        style={{ color: "var(--muted)" }}
                     >
-                        Resend
+                        ← Change phone number
                     </button>
-                </p>
-
-                {/* Back Link */}
-                <button
-                    onClick={() => router.back()}
-                    className="w-full text-sm text-center mt-4 hover:opacity-80"
-                    style={{ color: "var(--muted)" }}
-                >
-                    ← Back to phone number
-                </button>
+                </div>
             </div>
-        </main>
+
+            {/* Shake Animation CSS */}
+            <style jsx>{`
+                @keyframes shake {
+                    0%, 100% { transform: translateX(0); }
+                    20%, 60% { transform: translateX(-8px); }
+                    40%, 80% { transform: translateX(8px); }
+                }
+                .animate-shake {
+                    animation: shake 0.4s ease-in-out;
+                }
+            `}</style>
+        </div>
+    );
+}
+
+export default function VerifyPage() {
+    return (
+        <Suspense fallback={
+            <div className="min-h-screen flex items-center justify-center" style={{ background: "var(--gradient-hero)" }}>
+                <div className="animate-pulse text-center">
+                    <div className="w-16 h-16 rounded-2xl bg-gray-200 mx-auto mb-4" />
+                    <div className="w-48 h-6 bg-gray-200 rounded mx-auto" />
+                </div>
+            </div>
+        }>
+            <OTPContent />
+        </Suspense>
     );
 }

@@ -85,6 +85,87 @@ export default function PrescriptionPage() {
     const [showMedInstructions, setShowMedInstructions] = useState(false);
     const [nextMedId, setNextMedId] = useState(1);
 
+    // Enhancer state - Diagnosis
+    const [diagnosis, setDiagnosis] = useState("");
+
+    // Enhancer state - Vitals
+    const [vitals, setVitals] = useState({
+        bloodPressure: "",
+        heartRate: "",
+        temperature: "",
+        spO2: "",
+    });
+
+    // Enhancer state - Allergies
+    const [allergies, setAllergies] = useState<string[]>([]);
+    const [newAllergy, setNewAllergy] = useState("");
+
+    // Enhancer state - Additional Notes
+    const [additionalNotes, setAdditionalNotes] = useState("");
+
+    // Add allergy
+    const handleAddAllergy = () => {
+        if (newAllergy.trim() && !allergies.includes(newAllergy.trim())) {
+            setAllergies((prev) => [...prev, newAllergy.trim()]);
+            setNewAllergy("");
+        }
+    };
+
+    // Remove allergy
+    const handleRemoveAllergy = (allergy: string) => {
+        setAllergies((prev) => prev.filter((a) => a !== allergy));
+    };
+
+    // Print prescription
+    const handlePrint = () => {
+        const prescriptionData = {
+            patient: patientData,
+            medications,
+            diagnosis,
+            vitals,
+            allergies,
+            additionalNotes,
+            date: patientData.date,
+        };
+        console.log("Printing prescription:", prescriptionData);
+        // TODO: Generate PDF and trigger print dialog
+        alert("Printing prescription... (Check console for data)");
+        window.print();
+    };
+
+    // Export as PDF
+    const handleExportPDF = () => {
+        const prescriptionData = {
+            patient: patientData,
+            medications,
+            diagnosis,
+            vitals,
+            allergies,
+            additionalNotes,
+            date: patientData.date,
+        };
+        console.log("Exporting prescription as PDF:", prescriptionData);
+        // TODO: Generate and download PDF
+        alert("Exporting as PDF... (Check console for data)");
+    };
+
+    // Save draft
+    const handleSaveDraft = () => {
+        const prescriptionData = {
+            patient: patientData,
+            medications,
+            diagnosis,
+            vitals,
+            allergies,
+            additionalNotes,
+            date: patientData.date,
+            status: "Draft",
+        };
+        console.log("Saving draft:", prescriptionData);
+        // TODO: Save to backend
+        alert("Draft saved! (Check console for data)");
+    };
+
     // Calculate BMI automatically
     const bmi = useMemo(() => {
         const weightKg = parseFloat(patientData.weight);
@@ -932,6 +1013,8 @@ export default function PrescriptionPage() {
                             {activeEnhancerTab === "diagnosis" && (
                                 <div>
                                     <textarea
+                                        value={diagnosis}
+                                        onChange={(e) => setDiagnosis(e.target.value)}
                                         placeholder="Enter diagnosis..."
                                         className="w-full h-32 px-3 py-2 rounded-lg text-sm resize-none outline-none"
                                         style={{
@@ -955,6 +1038,8 @@ export default function PrescriptionPage() {
                                             </label>
                                             <input
                                                 type="text"
+                                                value={vitals.bloodPressure}
+                                                onChange={(e) => setVitals((prev) => ({ ...prev, bloodPressure: e.target.value }))}
                                                 placeholder="120/80"
                                                 className="w-full px-3 py-2 rounded-lg text-sm outline-none"
                                                 style={{
@@ -973,6 +1058,8 @@ export default function PrescriptionPage() {
                                             </label>
                                             <input
                                                 type="text"
+                                                value={vitals.heartRate}
+                                                onChange={(e) => setVitals((prev) => ({ ...prev, heartRate: e.target.value }))}
                                                 placeholder="72 bpm"
                                                 className="w-full px-3 py-2 rounded-lg text-sm outline-none"
                                                 style={{
@@ -993,6 +1080,8 @@ export default function PrescriptionPage() {
                                             </label>
                                             <input
                                                 type="text"
+                                                value={vitals.temperature}
+                                                onChange={(e) => setVitals((prev) => ({ ...prev, temperature: e.target.value }))}
                                                 placeholder="98.6°F"
                                                 className="w-full px-3 py-2 rounded-lg text-sm outline-none"
                                                 style={{
@@ -1011,6 +1100,8 @@ export default function PrescriptionPage() {
                                             </label>
                                             <input
                                                 type="text"
+                                                value={vitals.spO2}
+                                                onChange={(e) => setVitals((prev) => ({ ...prev, spO2: e.target.value }))}
                                                 placeholder="98%"
                                                 className="w-full px-3 py-2 rounded-lg text-sm outline-none"
                                                 style={{
@@ -1026,21 +1117,66 @@ export default function PrescriptionPage() {
 
                             {activeEnhancerTab === "allergies" && (
                                 <div>
-                                    <textarea
-                                        placeholder="List known allergies..."
-                                        className="w-full h-32 px-3 py-2 rounded-lg text-sm resize-none outline-none"
-                                        style={{
-                                            backgroundColor: "var(--input-bg)",
-                                            border: "1px solid var(--input-border)",
-                                            color: "var(--foreground)",
-                                        }}
-                                    />
+                                    <div className="flex gap-2 mb-3">
+                                        <input
+                                            type="text"
+                                            value={newAllergy}
+                                            onChange={(e) => setNewAllergy(e.target.value)}
+                                            onKeyDown={(e) => e.key === "Enter" && handleAddAllergy()}
+                                            placeholder="Add allergy..."
+                                            className="flex-1 px-3 py-2 rounded-lg text-sm outline-none"
+                                            style={{
+                                                backgroundColor: "var(--input-bg)",
+                                                border: "1px solid var(--input-border)",
+                                                color: "var(--foreground)",
+                                            }}
+                                        />
+                                        <button
+                                            onClick={handleAddAllergy}
+                                            disabled={!newAllergy.trim()}
+                                            className="px-3 py-2 rounded-lg text-sm font-medium transition-all hover:opacity-90 disabled:opacity-50"
+                                            style={{
+                                                backgroundColor: "var(--primary)",
+                                                color: "var(--background)",
+                                            }}
+                                        >
+                                            Add
+                                        </button>
+                                    </div>
+                                    {allergies.length > 0 ? (
+                                        <div className="flex flex-wrap gap-2">
+                                            {allergies.map((allergy) => (
+                                                <span
+                                                    key={allergy}
+                                                    className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs"
+                                                    style={{
+                                                        backgroundColor: "#fee2e2",
+                                                        color: "#dc2626",
+                                                    }}
+                                                >
+                                                    {allergy}
+                                                    <button
+                                                        onClick={() => handleRemoveAllergy(allergy)}
+                                                        className="hover:opacity-60"
+                                                    >
+                                                        ×
+                                                    </button>
+                                                </span>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs text-center py-4" style={{ color: "var(--muted)" }}>
+                                            No allergies recorded
+                                        </p>
+                                    )}
                                 </div>
                             )}
 
                             {activeEnhancerTab === "notes" && (
                                 <div>
                                     <textarea
+                                        value={additionalNotes}
+                                        onChange={(e) => setAdditionalNotes(e.target.value)}
                                         placeholder="Additional notes for this prescription..."
                                         className="w-full h-32 px-3 py-2 rounded-lg text-sm resize-none outline-none"
                                         style={{
@@ -1072,6 +1208,7 @@ export default function PrescriptionPage() {
                         <div className="space-y-3">
                             {/* Print Button */}
                             <button
+                                onClick={handlePrint}
                                 className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-medium transition-all hover:opacity-90"
                                 style={{
                                     backgroundColor: "var(--primary)",
@@ -1097,6 +1234,7 @@ export default function PrescriptionPage() {
 
                             {/* Export as PDF Button */}
                             <button
+                                onClick={handleExportPDF}
                                 className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-medium transition-all hover:opacity-80"
                                 style={{
                                     backgroundColor: "transparent",
@@ -1124,6 +1262,7 @@ export default function PrescriptionPage() {
 
                             {/* Save Draft Button */}
                             <button
+                                onClick={handleSaveDraft}
                                 className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-medium transition-all hover:opacity-80"
                                 style={{
                                     backgroundColor: "transparent",

@@ -2,274 +2,467 @@
 
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import { useTheme } from "@/components/ThemeProvider";
 
 /**
- * PROFILE SETUP PAGE
+ * MULTI-STEP PROFILE SETUP PAGE
  * 
- * BACKEND INTEGRATION NOTES:
- * -------------------------
- * 1. This page is shown after successful OTP verification
- * 2. User provides their name and optional profile picture
- * 3. The handleCreate function should:
- *    - Upload profile picture to storage (if provided)
- *    - Create/update user profile in database with name and picture URL
- *    - On success: redirect to dashboard
- *    - On failure: show error message
- * 
- * Current Implementation:
- * - Frontend only, stores image as base64 preview
- * - Replace console.log with actual API calls when backend is ready
+ * Steps:
+ * 1. Personal Info (Photo, Name)
+ * 2. Professional Info (Specialty, License)
+ * 3. Practice Info (Clinic name, Address)
  */
 
-export default function ProfileSetupPage() {
+// Specialty options
+const specialties = [
+    "General Practice",
+    "Internal Medicine",
+    "Pediatrics",
+    "Cardiology",
+    "Dermatology",
+    "Neurology",
+    "Orthopedics",
+    "Psychiatry",
+    "Surgery",
+    "Other",
+];
+
+interface ProfileData {
+    photo: string | null;
+    fullName: string;
+    specialty: string;
+    licenseNumber: string;
+    clinicName: string;
+    clinicAddress: string;
+    clinicPhone: string;
+}
+
+export default function SetupPage() {
     const router = useRouter();
-    const { theme } = useTheme();
+    const { theme, toggleTheme } = useTheme();
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const [name, setName] = useState("");
-    const [profileImage, setProfileImage] = useState<string | null>(null);
-    const [isLoading, setIsLoading] = useState(false);
+    const [step, setStep] = useState(1);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [profile, setProfile] = useState<ProfileData>({
+        photo: null,
+        fullName: "",
+        specialty: "",
+        licenseNumber: "",
+        clinicName: "",
+        clinicAddress: "",
+        clinicPhone: "",
+    });
 
-    const handleImageClick = () => {
-        fileInputRef.current?.click();
-    };
-
-    const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Handle photo upload
+    const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
-            // Validate file type
-            if (!file.type.startsWith("image/")) {
-                alert("Please select an image file");
-                return;
-            }
-
-            // Validate file size (max 5MB)
-            if (file.size > 5 * 1024 * 1024) {
-                alert("Image size should be less than 5MB");
-                return;
-            }
-
-            // Create preview
             const reader = new FileReader();
-            reader.onload = (event) => {
-                setProfileImage(event.target?.result as string);
+            reader.onloadend = () => {
+                setProfile((prev) => ({ ...prev, photo: reader.result as string }));
             };
             reader.readAsDataURL(file);
         }
     };
 
-    const handleCreate = async (e: React.FormEvent) => {
-        e.preventDefault();
+    // Handle input change
+    const handleChange = (field: keyof ProfileData, value: string) => {
+        setProfile((prev) => ({ ...prev, [field]: value }));
+    };
 
-        if (!name.trim()) {
-            return;
+    // Next step
+    const handleNext = () => {
+        if (step < 3) {
+            setStep(step + 1);
+        } else {
+            handleComplete();
         }
+    };
 
-        setIsLoading(true);
+    // Previous step
+    const handleBack = () => {
+        if (step > 1) {
+            setStep(step - 1);
+        }
+    };
 
-        /**
-         * TODO: BACKEND INTEGRATION
-         * Replace this with actual API call to create user profile:
-         * 
-         * try {
-         *   // First upload image if provided
-         *   let profilePictureUrl = null;
-         *   if (profileImage) {
-         *     profilePictureUrl = await uploadImage(profileImage);
-         *   }
-         *   
-         *   // Then create/update user profile
-         *   const response = await createProfile({
-         *     name: name.trim(),
-         *     profilePicture: profilePictureUrl
-         *   });
-         *   
-         *   if (response.success) {
-         *     router.push("/dashboard");
-         *   } else {
-         *     setError("Failed to create profile. Please try again.");
-         *   }
-         * } catch (error) {
-         *   setError("Something went wrong. Please try again.");
-         * } finally {
-         *   setIsLoading(false);
-         * }
-         */
+    // Complete setup
+    const handleComplete = async () => {
+        setIsSubmitting(true);
+        // TODO: Save profile to API
+        await new Promise((r) => setTimeout(r, 1000));
+        router.push("/dashboard");
+    };
 
-        console.log("Creating profile:", { name: name.trim(), hasImage: !!profileImage });
-
-        // Simulate API call delay
-        setTimeout(() => {
-            setIsLoading(false);
-            router.push("/dashboard");
-        }, 500);
+    // Check if current step is valid
+    const isStepValid = () => {
+        switch (step) {
+            case 1:
+                return profile.fullName.trim().length >= 2;
+            case 2:
+                return profile.specialty !== "";
+            case 3:
+                return true; // Optional step
+            default:
+                return false;
+        }
     };
 
     return (
-        <main
-            className="min-h-screen flex items-center justify-center px-4"
-            style={{ backgroundColor: "var(--background)" }}
+        <div
+            className="min-h-screen flex items-center justify-center py-12"
+            style={{ background: "var(--gradient-hero)" }}
         >
-            {/* Theme Toggle - Top Right Corner */}
-            <ThemeToggle />
-
-            {/* Profile Setup Card */}
-            <div
-                className="w-full max-w-[456px] px-10 py-12 rounded-2xl"
+            {/* Theme Toggle */}
+            <button
+                onClick={toggleTheme}
+                className="fixed top-6 right-6 p-3 rounded-full transition-all hover:scale-110 z-50"
                 style={{
-                    backgroundColor: "var(--card-bg)",
+                    background: "var(--card-bg)",
                     border: "1px solid var(--card-border)",
-                    boxShadow: "0 4px 24px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)",
+                    boxShadow: "var(--card-shadow)",
                 }}
             >
-                {/* Profile Picture Upload */}
-                <div className="flex justify-center mb-8">
-                    <button
-                        type="button"
-                        onClick={handleImageClick}
-                        className="relative group focus:outline-none"
-                    >
-                        {/* Profile Picture Circle */}
-                        <div
-                            className="w-32 h-32 rounded-full overflow-hidden transition-all duration-200 group-hover:opacity-80"
-                            style={{
-                                backgroundColor: "var(--input-bg)",
-                                border: "3px dashed var(--input-border)",
-                            }}
-                        >
-                            {profileImage ? (
-                                <img
-                                    src={profileImage}
-                                    alt="Profile preview"
-                                    className="w-full h-full object-cover"
-                                />
-                            ) : (
-                                <div className="w-full h-full flex flex-col items-center justify-center">
-                                    {/* Camera/Upload Icon */}
-                                    <svg
-                                        width="32"
-                                        height="32"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="1.5"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        style={{ color: "var(--muted)" }}
-                                    >
-                                        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-                                        <circle cx="12" cy="13" r="4" />
-                                    </svg>
-                                    <span
-                                        className="text-xs mt-2"
-                                        style={{ color: "var(--muted)" }}
-                                    >
-                                        Add Photo
-                                    </span>
-                                </div>
-                            )}
-                        </div>
+                {theme === "light" ? (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                    </svg>
+                ) : (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="12" r="5" />
+                        <line x1="12" y1="1" x2="12" y2="3" />
+                        <line x1="12" y1="21" x2="12" y2="23" />
+                    </svg>
+                )}
+            </button>
 
-                        {/* Edit Badge */}
-                        {profileImage && (
-                            <div
-                                className="absolute bottom-1 right-1 w-8 h-8 rounded-full flex items-center justify-center"
-                                style={{
-                                    backgroundColor: "var(--primary)",
-                                    color: "var(--background)",
-                                }}
-                            >
-                                <svg
-                                    width="14"
-                                    height="14"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
+            <div className="w-full max-w-lg px-6">
+                <div
+                    className="p-8 rounded-2xl"
+                    style={{
+                        background: "var(--card-bg)",
+                        border: "1px solid var(--card-border)",
+                        boxShadow: "0 8px 32px rgba(0, 0, 0, 0.08)",
+                    }}
+                >
+                    {/* Progress Steps */}
+                    <div className="flex items-center justify-center gap-2 mb-8">
+                        {[1, 2, 3].map((s) => (
+                            <div key={s} className="flex items-center">
+                                <div
+                                    className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold transition-all"
+                                    style={{
+                                        background: s <= step ? "var(--gradient-primary)" : "var(--background-secondary)",
+                                        color: s <= step ? "white" : "var(--muted)",
+                                    }}
                                 >
-                                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                                </svg>
+                                    {s < step ? (
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                                            <polyline points="20 6 9 17 4 12" />
+                                        </svg>
+                                    ) : (
+                                        s
+                                    )}
+                                </div>
+                                {s < 3 && (
+                                    <div
+                                        className="w-12 h-0.5 mx-1"
+                                        style={{
+                                            background: s < step ? "var(--primary)" : "var(--card-border)",
+                                        }}
+                                    />
+                                )}
                             </div>
-                        )}
-                    </button>
-
-                    {/* Hidden File Input */}
-                    <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="image/*"
-                        onChange={handleImageChange}
-                        className="hidden"
-                    />
-                </div>
-
-                {/* Setup Text */}
-                <div className="text-center mb-8">
-                    <h1
-                        className="text-2xl font-semibold mb-2"
-                        style={{ color: "var(--foreground)" }}
-                    >
-                        Set Up Your Profile
-                    </h1>
-                    <p
-                        className="text-sm"
-                        style={{ color: "var(--muted)" }}
-                    >
-                        Add your name and a profile picture
-                    </p>
-                </div>
-
-                {/* Profile Form */}
-                <form onSubmit={handleCreate}>
-                    <div className="mb-6">
-                        <label
-                            className="block text-sm font-medium mb-2"
-                            style={{ color: "var(--foreground)" }}
-                        >
-                            Your Name
-                        </label>
-                        <input
-                            type="text"
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            placeholder="Enter your name"
-                            className="w-full px-4 py-3 rounded-lg text-sm outline-none transition-all duration-200"
-                            style={{
-                                backgroundColor: "var(--input-bg)",
-                                border: "1px solid var(--input-border)",
-                                color: "var(--foreground)",
-                            }}
-                            required
-                        />
+                        ))}
                     </div>
 
-                    {/* Create Button */}
-                    <button
-                        type="submit"
-                        disabled={!name.trim() || isLoading}
-                        className="w-full py-3 rounded-lg text-sm font-medium transition-all duration-200 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                        style={{
-                            backgroundColor: "var(--primary)",
-                            color: "var(--background)",
-                        }}
-                    >
-                        {isLoading ? "Creating..." : "Create"}
-                    </button>
-                </form>
+                    {/* Step 1: Personal Info */}
+                    {step === 1 && (
+                        <div className="animate-fade-in">
+                            <div className="text-center mb-6">
+                                <h1
+                                    className="text-2xl font-bold mb-2"
+                                    style={{ color: "var(--foreground)" }}
+                                >
+                                    Welcome to Tabibn
+                                </h1>
+                                <p style={{ color: "var(--muted)" }}>
+                                    Let&apos;s set up your profile
+                                </p>
+                            </div>
 
-                {/* Skip Option */}
-                <p
-                    className="text-sm text-center mt-6"
-                    style={{ color: "var(--muted)" }}
-                >
-                    You can update your profile later in settings
-                </p>
+                            {/* Photo Upload */}
+                            <div className="flex justify-center mb-6">
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    accept="image/*"
+                                    className="hidden"
+                                    onChange={handlePhotoChange}
+                                />
+                                <button
+                                    onClick={() => fileInputRef.current?.click()}
+                                    className="w-28 h-28 rounded-full flex items-center justify-center overflow-hidden transition-all hover:opacity-80"
+                                    style={{
+                                        background: profile.photo ? "transparent" : "var(--primary-subtle)",
+                                        border: `2px dashed ${profile.photo ? "transparent" : "var(--primary)"}`,
+                                    }}
+                                >
+                                    {profile.photo ? (
+                                        <img
+                                            src={profile.photo}
+                                            alt="Profile"
+                                            className="w-full h-full object-cover"
+                                        />
+                                    ) : (
+                                        <div className="text-center">
+                                            <svg
+                                                className="mx-auto mb-1"
+                                                width="32"
+                                                height="32"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="var(--primary)"
+                                                strokeWidth="1.5"
+                                            >
+                                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                                                <circle cx="12" cy="7" r="4" />
+                                            </svg>
+                                            <span className="text-xs" style={{ color: "var(--primary)" }}>
+                                                Add Photo
+                                            </span>
+                                        </div>
+                                    )}
+                                </button>
+                            </div>
+
+                            {/* Name Input */}
+                            <div>
+                                <label
+                                    className="block text-sm font-medium mb-2"
+                                    style={{ color: "var(--foreground)" }}
+                                >
+                                    Full Name <span style={{ color: "var(--accent-danger)" }}>*</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    value={profile.fullName}
+                                    onChange={(e) => handleChange("fullName", e.target.value)}
+                                    placeholder="Dr. John Smith"
+                                    className="w-full px-4 py-3 rounded-xl text-sm outline-none"
+                                    style={{
+                                        background: "var(--input-bg)",
+                                        border: "1px solid var(--input-border)",
+                                        color: "var(--foreground)",
+                                    }}
+                                />
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Step 2: Professional Info */}
+                    {step === 2 && (
+                        <div className="animate-fade-in">
+                            <div className="text-center mb-6">
+                                <h1
+                                    className="text-2xl font-bold mb-2"
+                                    style={{ color: "var(--foreground)" }}
+                                >
+                                    Professional Details
+                                </h1>
+                                <p style={{ color: "var(--muted)" }}>
+                                    Tell us about your practice
+                                </p>
+                            </div>
+
+                            <div className="space-y-4">
+                                {/* Specialty */}
+                                <div>
+                                    <label
+                                        className="block text-sm font-medium mb-2"
+                                        style={{ color: "var(--foreground)" }}
+                                    >
+                                        Specialty <span style={{ color: "var(--accent-danger)" }}>*</span>
+                                    </label>
+                                    <select
+                                        value={profile.specialty}
+                                        onChange={(e) => handleChange("specialty", e.target.value)}
+                                        className="w-full px-4 py-3 rounded-xl text-sm outline-none"
+                                        style={{
+                                            background: "var(--input-bg)",
+                                            border: "1px solid var(--input-border)",
+                                            color: profile.specialty ? "var(--foreground)" : "var(--muted)",
+                                        }}
+                                    >
+                                        <option value="">Select your specialty</option>
+                                        {specialties.map((s) => (
+                                            <option key={s} value={s}>{s}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                {/* License Number */}
+                                <div>
+                                    <label
+                                        className="block text-sm font-medium mb-2"
+                                        style={{ color: "var(--foreground)" }}
+                                    >
+                                        Medical License Number
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={profile.licenseNumber}
+                                        onChange={(e) => handleChange("licenseNumber", e.target.value)}
+                                        placeholder="Optional"
+                                        className="w-full px-4 py-3 rounded-xl text-sm outline-none"
+                                        style={{
+                                            background: "var(--input-bg)",
+                                            border: "1px solid var(--input-border)",
+                                            color: "var(--foreground)",
+                                        }}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Step 3: Practice Info */}
+                    {step === 3 && (
+                        <div className="animate-fade-in">
+                            <div className="text-center mb-6">
+                                <h1
+                                    className="text-2xl font-bold mb-2"
+                                    style={{ color: "var(--foreground)" }}
+                                >
+                                    Your Practice
+                                </h1>
+                                <p style={{ color: "var(--muted)" }}>
+                                    This information will appear on prescriptions
+                                </p>
+                            </div>
+
+                            <div className="space-y-4">
+                                {/* Clinic Name */}
+                                <div>
+                                    <label
+                                        className="block text-sm font-medium mb-2"
+                                        style={{ color: "var(--foreground)" }}
+                                    >
+                                        Clinic / Hospital Name
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={profile.clinicName}
+                                        onChange={(e) => handleChange("clinicName", e.target.value)}
+                                        placeholder="City Medical Center"
+                                        className="w-full px-4 py-3 rounded-xl text-sm outline-none"
+                                        style={{
+                                            background: "var(--input-bg)",
+                                            border: "1px solid var(--input-border)",
+                                            color: "var(--foreground)",
+                                        }}
+                                    />
+                                </div>
+
+                                {/* Clinic Address */}
+                                <div>
+                                    <label
+                                        className="block text-sm font-medium mb-2"
+                                        style={{ color: "var(--foreground)" }}
+                                    >
+                                        Address
+                                    </label>
+                                    <textarea
+                                        value={profile.clinicAddress}
+                                        onChange={(e) => handleChange("clinicAddress", e.target.value)}
+                                        placeholder="Street address, City, Country"
+                                        rows={2}
+                                        className="w-full px-4 py-3 rounded-xl text-sm outline-none resize-none"
+                                        style={{
+                                            background: "var(--input-bg)",
+                                            border: "1px solid var(--input-border)",
+                                            color: "var(--foreground)",
+                                        }}
+                                    />
+                                </div>
+
+                                {/* Clinic Phone */}
+                                <div>
+                                    <label
+                                        className="block text-sm font-medium mb-2"
+                                        style={{ color: "var(--foreground)" }}
+                                    >
+                                        Clinic Phone
+                                    </label>
+                                    <input
+                                        type="tel"
+                                        value={profile.clinicPhone}
+                                        onChange={(e) => handleChange("clinicPhone", e.target.value)}
+                                        placeholder="+93 700 000 000"
+                                        className="w-full px-4 py-3 rounded-xl text-sm outline-none"
+                                        style={{
+                                            background: "var(--input-bg)",
+                                            border: "1px solid var(--input-border)",
+                                            color: "var(--foreground)",
+                                        }}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Navigation Buttons */}
+                    <div className="flex gap-3 mt-8">
+                        {step > 1 && (
+                            <button
+                                onClick={handleBack}
+                                className="flex-1 py-3.5 rounded-xl text-sm font-semibold transition-all"
+                                style={{
+                                    background: "var(--background-secondary)",
+                                    color: "var(--foreground)",
+                                }}
+                            >
+                                Back
+                            </button>
+                        )}
+                        <button
+                            onClick={handleNext}
+                            disabled={!isStepValid() || isSubmitting}
+                            className="flex-1 py-3.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50"
+                            style={{
+                                background: "var(--gradient-primary)",
+                                color: "white",
+                            }}
+                        >
+                            {isSubmitting ? (
+                                <span className="flex items-center justify-center gap-2">
+                                    <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                    </svg>
+                                    Setting up...
+                                </span>
+                            ) : step === 3 ? (
+                                "Complete Setup"
+                            ) : (
+                                "Continue"
+                            )}
+                        </button>
+                    </div>
+
+                    {/* Skip for now */}
+                    {step === 3 && (
+                        <button
+                            onClick={() => router.push("/dashboard")}
+                            className="w-full mt-3 py-2 text-sm transition-all hover:opacity-80"
+                            style={{ color: "var(--muted)" }}
+                        >
+                            Skip for now
+                        </button>
+                    )}
+                </div>
             </div>
-        </main>
+        </div>
     );
 }

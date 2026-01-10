@@ -3,10 +3,7 @@ import { Sidebar } from "@/components/Sidebar";
 /**
  * DASHBOARD LAYOUT
  * 
- * This layout wraps all pages under /dashboard/*
- * It provides the persistent sidebar navigation and main content area
- * 
- * NOTE: Theme toggle will be implemented in Profile settings
+ * Premium layout with persistent sidebar and content area
  */
 
 export default function DashboardLayout({
@@ -21,14 +18,15 @@ export default function DashboardLayout({
 
             {/* Main Content Area */}
             <main
-                className="ml-[250px] min-h-screen"
+                className="ml-[260px] min-h-screen"
                 style={{ backgroundColor: "var(--background)" }}
             >
                 {/* Page Content */}
-                <div className="px-8 pb-8">
+                <div className="p-8">
                     {children}
                 </div>
             </main>
         </div>
     );
 }
+
