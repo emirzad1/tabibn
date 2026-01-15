@@ -356,21 +356,10 @@ select:focus {
   }
 }
 
-/* A4 Print Size */
+/* A4 Print Size - Handled dynamically in pages */
 @media print {
   @page {
-    size: A4;
     margin: 0;
-  }
-}
-
-/* Letter Print Size - use class to toggle */
-@media print {
-  .print-letter {
-    @page {
-      size: letter;
-      margin: 0;
-    }
   }
 }
 

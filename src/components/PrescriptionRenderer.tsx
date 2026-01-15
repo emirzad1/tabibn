@@ -26,6 +26,11 @@ export interface PrescriptionSettings {
         doctorNameFa: string;
         titleFa: string;
         bioFa: string;
+        // Clinic info
+        clinicName: string;
+        address: string;
+        phone: string;
+        email: string;
         // Logo
         logoUrl?: string;
         showLogo: boolean;
@@ -38,6 +43,11 @@ export interface PrescriptionSettings {
         // Signature area
         signatureName: string;
         signatureTitle: string;
+        // Additional
+        doctorName: string;
+        licenseNumber: string;
+        signatureLabel: string;
+        disclaimer: string;
     };
     pageSize: PaperSize;
     // Pre-printed letterhead support
@@ -60,6 +70,11 @@ export const getDefaultSettings = (): PrescriptionSettings => ({
         doctorNameFa: "داکتر جان اسمیت",
         titleFa: "متخصص طب عمومی",
         bioFa: "متخصص طب خانواده",
+        // Clinic
+        clinicName: "Tabibn Medical Center",
+        address: "123 Medical Center, Kabul, Afghanistan",
+        phone: "+93 700 123 456",
+        email: "doctor@clinic.com",
         logoUrl: "",
         showLogo: false,
     },
@@ -69,6 +84,10 @@ export const getDefaultSettings = (): PrescriptionSettings => ({
         email: "doctor@clinic.com",
         signatureName: "Dr. John Smith",
         signatureTitle: "General Practitioner",
+        doctorName: "Dr. John Smith",
+        licenseNumber: "MD-12345",
+        signatureLabel: "Doctor's Signature",
+        disclaimer: "This is a computer generated prescription.",
     },
     pageSize: "A4",
     showHeader: true,
