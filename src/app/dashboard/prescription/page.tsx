@@ -1,6 +1,10 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { createPortal } from "react-dom";
+import PrescriptionRenderer, { PrescriptionSettings, getDefaultSettings, PrescriptionData, PAPER_SIZES } from "@/components/PrescriptionRenderer";
+import { supabase } from "@/lib/supabase";
 
 /**
  * PRESCRIPTION PAGE
@@ -34,6 +38,7 @@ const formatDate = (date: Date) => {
 
 // Initial patient form state
 const getInitialPatientData = () => ({
+    id: "", // Added ID for database linking
     name: "",
     idNumber: "",
     date: formatDate(new Date()),
@@ -73,6 +78,7 @@ const initialPrescriptions = [
 ];
 
 export default function PrescriptionPage() {
+    const router = useRouter();
     const [activeEnhancerTab, setActiveEnhancerTab] = useState("diagnosis");
     const [showMoreInfo, setShowMoreInfo] = useState(false);
     const [patientData, setPatientData] = useState(getInitialPatientData());
@@ -103,6 +109,145 @@ export default function PrescriptionPage() {
     // Enhancer state - Additional Notes
     const [additionalNotes, setAdditionalNotes] = useState("");
 
+    // Preview modal state
+    const [showPreviewModal, setShowPreviewModal] = useState(false);
+    // Print data state for in-page printing
+    const [printData, setPrintData] = useState<PrescriptionData | null>(null);
+    const [mounted, setMounted] = useState(false);
+
+    // Settings state
+    const [prescriptionSettings, setPrescriptionSettings] = useState<PrescriptionSettings>(getDefaultSettings());
+
+    useEffect(() => {
+        setMounted(true);
+
+        const loadSettings = async () => {
+            // Priority 1: Local Storage
+            const saved = localStorage.getItem("tabibn-print-settings");
+            if (saved) {
+                try {
+                    setPrescriptionSettings(prev => ({ ...prev, ...JSON.parse(saved) }));
+                } catch { }
+            }
+
+            // Priority 2: Fetch from Doctor Profile
+            try {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (!user) return;
+
+                const { data: profile } = await supabase
+                    .from('doctor_profiles')
+                    .select('*')
+                    .eq('id', user.id)
+                    .single();
+
+                if (profile) {
+                    setPrescriptionSettings(prev => ({
+                        ...prev,
+                        header: {
+                            ...prev.header,
+                            doctorNameEn: profile.full_name || prev.header.doctorNameEn,
+                            titleEn: profile.specialty || prev.header.titleEn,
+                            bioEn: profile.clinic_name || prev.header.bioEn,
+                            doctorNameFa: profile.full_name_fa || profile.full_name || prev.header.doctorNameFa,
+                            titleFa: profile.specialty_fa || profile.specialty || prev.header.titleFa,
+                            bioFa: profile.clinic_name_fa || profile.clinic_name || prev.header.bioFa,
+                        },
+                        footer: {
+                            ...prev.footer,
+                            address: profile.clinic_address || prev.footer.address,
+                            phone: profile.phone_number || prev.footer.phone,
+                            email: profile.email || user.email || prev.footer.email,
+                            signatureName: profile.full_name || prev.footer.signatureName,
+                            signatureTitle: profile.specialty || prev.footer.signatureTitle,
+                        }
+                    }));
+                }
+            } catch (error) {
+                console.error("Failed to load doctor profile for print settings:", error);
+            }
+        };
+
+        loadSettings();
+    }, []);
+
+    // Search state
+    const [searchResults, setSearchResults] = useState<any[]>([]);
+    const [showResults, setShowResults] = useState(false);
+
+    // Search patients effect
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            if (patientData.name && patientData.name.length >= 2 && showResults) {
+                searchPatients(patientData.name);
+            }
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [patientData.name, showResults]);
+
+    const searchPatients = async (query: string) => {
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            const { data } = await supabase
+                .from('patients')
+                .select('*')
+                .eq('user_id', user.id)
+                .ilike('name', `%${query}%`)
+                .limit(5);
+
+            if (data) setSearchResults(data);
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
+    const selectPatient = (patient: any) => {
+        setPatientData(prev => ({
+            ...prev,
+            id: patient.id,
+            name: patient.name,
+            idNumber: patient.id_number || "",
+            // Don't overwrite date
+            age: patient.age ? patient.age.toString() : "",
+            sex: patient.sex ? patient.sex.toLowerCase() : "",
+            phone: patient.phone || "",
+            address: patient.address || "",
+            weight: patient.weight ? patient.weight.toString() : "",
+            height: patient.height ? patient.height.toString() : "",
+            note: patient.note || "",
+        }));
+        setShowResults(false);
+        setSearchResults([]);
+    };
+
+
+
+    // Save settings to localStorage when changed
+    const handleSettingsChange = (newSettings: PrescriptionSettings) => {
+        setPrescriptionSettings(newSettings);
+        localStorage.setItem("tabibn-print-settings", JSON.stringify(newSettings));
+    };
+
+    // Get prescription data for preview
+    const getPrescriptionData = (): PrescriptionData => ({
+        patient: {
+            name: patientData.name,
+            idNumber: patientData.idNumber,
+            date: patientData.date,
+            age: patientData.age,
+            sex: patientData.sex,
+            phone: patientData.phone,
+            address: patientData.address,
+        },
+        medications,
+        diagnosis,
+        vitals,
+        allergies,
+        additionalNotes,
+    });
+
     // Add allergy
     const handleAddAllergy = () => {
         if (newAllergy.trim() && !allergies.includes(newAllergy.trim())) {
@@ -116,54 +261,179 @@ export default function PrescriptionPage() {
         setAllergies((prev) => prev.filter((a) => a !== allergy));
     };
 
-    // Print prescription
-    const handlePrint = () => {
-        const prescriptionData = {
-            patient: patientData,
-            medications,
-            diagnosis,
-            vitals,
-            allergies,
-            additionalNotes,
-            date: patientData.date,
-        };
-        console.log("Printing prescription:", prescriptionData);
-        // TODO: Generate PDF and trigger print dialog
-        alert("Printing prescription... (Check console for data)");
-        window.print();
+    // Generate unique access code
+    const generateAccessCode = () => {
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        const segment1 = Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+        const segment2 = Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+        return `RX-${segment1}-${segment2}`;
     };
 
-    // Export as PDF
-    const handleExportPDF = () => {
-        const prescriptionData = {
-            patient: patientData,
-            medications,
-            diagnosis,
-            vitals,
-            allergies,
-            additionalNotes,
-            date: patientData.date,
-        };
-        console.log("Exporting prescription as PDF:", prescriptionData);
-        // TODO: Generate and download PDF
-        alert("Exporting as PDF... (Check console for data)");
+    // Navigate to print page
+    const handlePrint = async () => {
+        const result = await savePrescriptionToSupabase('Printed');
+        if (result.success && result.code) {
+            const data = getPrescriptionData();
+            // Include Access Code in print data
+            setPrintData({ ...data, accessCode: result.code });
+
+            setTimeout(() => {
+                window.print();
+            }, 500);
+        }
+    };
+
+    // Navigate to export
+    const handleExportPDF = async () => {
+        const result = await savePrescriptionToSupabase('Printed');
+        if (result.success && result.code) {
+            const prescriptionData = getPrescriptionData();
+            sessionStorage.setItem("tabibn-prescription-data", JSON.stringify({ ...prescriptionData, accessCode: result.code }));
+            router.push("/dashboard/prescription/print");
+        }
     };
 
     // Save draft
-    const handleSaveDraft = () => {
-        const prescriptionData = {
-            patient: patientData,
-            medications,
-            diagnosis,
-            vitals,
-            allergies,
-            additionalNotes,
-            date: patientData.date,
-            status: "Draft",
-        };
-        console.log("Saving draft:", prescriptionData);
-        // TODO: Save to backend
-        alert("Draft saved! (Check console for data)");
+    const handleSaveDraft = async () => {
+        const result = await savePrescriptionToSupabase('Draft');
+        if (result.success && result.code) {
+            alert(`Prescription saved! Access Code: ${result.code}`);
+        }
+    };
+
+    // Internal helper to save patient
+    const savePatientInternal = async () => {
+        if (!patientData.name || !patientData.age) {
+            alert("Please fill in required patient fields (Name and Age)");
+            return null;
+        }
+
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) throw new Error("Not authenticated");
+
+            const patientRecord = {
+                user_id: user.id,
+                name: patientData.name,
+                id_number: patientData.idNumber || `P-${Date.now().toString().slice(-6)}`,
+                age: parseInt(patientData.age),
+                sex: patientData.sex || null,
+                phone: patientData.phone || null,
+                address: patientData.address || null,
+                weight: patientData.weight ? parseFloat(patientData.weight) : null,
+                height: patientData.height ? parseFloat(patientData.height) : null,
+                bmi: bmi ? parseFloat(bmi) : null,
+                note: patientData.note || null,
+            };
+
+            let result;
+            // @ts-ignore
+            if (patientData.id) {
+                result = await supabase
+                    .from('patients')
+                    .update(patientRecord)
+                    // @ts-ignore
+                    .eq('id', patientData.id)
+                    .select()
+                    .single();
+            } else {
+                result = await supabase
+                    .from('patients')
+                    .insert([patientRecord])
+                    .select()
+                    .single();
+            }
+
+            if (result.error) throw result.error;
+
+            const newPatient = result.data;
+            setPatientData(prev => ({
+                ...prev,
+                id: newPatient.id,
+                idNumber: newPatient.id_number
+            }));
+
+            return newPatient;
+        } catch (error: any) {
+            console.error("Error saving patient:", error);
+            alert(`Failed to save patient: ${error.message}`);
+            return null;
+        }
+    };
+
+    // Internal helper to save prescription
+    const savePrescriptionToSupabase = async (status: 'Draft' | 'Printed'): Promise<{ success: boolean; code?: string }> => {
+        try {
+            const patient = await savePatientInternal();
+            if (!patient) return { success: false };
+
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return { success: false };
+
+            const accessCode = generateAccessCode();
+
+            // Create Prescription
+            const { data: prescription, error: presError } = await supabase
+                .from('prescriptions')
+                .insert([{
+                    user_id: user.id,
+                    patient_id: patient.id,
+                    patient_name: patient.name,
+                    patient_id_number: patient.id_number,
+                    date: patientData.date,
+                    diagnosis: diagnosis,
+                    additional_notes: additionalNotes,
+                    status: status,
+                    access_code: accessCode
+                }])
+                .select()
+                .single();
+
+            if (presError) throw presError;
+
+            const prescriptionId = prescription.id;
+
+            // Medications
+            if (medications.length > 0) {
+                const medsToInsert = medications.map((m, idx) => ({
+                    prescription_id: prescriptionId,
+                    name: m.name,
+                    strength: m.strength,
+                    frequency: m.frequency,
+                    duration: m.duration,
+                    quantity: m.quantity,
+                    instructions: m.instructions,
+                    order_index: idx
+                }));
+                await supabase.from('medications').insert(medsToInsert);
+            }
+
+            // Vitals
+            if (Object.values(vitals).some(v => v)) {
+                await supabase.from('vitals').insert([{
+                    prescription_id: prescriptionId,
+                    blood_pressure: vitals.bloodPressure,
+                    heart_rate: vitals.heartRate,
+                    temperature: vitals.temperature,
+                    spo2: vitals.spO2
+                }]);
+            }
+
+            // Allergies
+            if (allergies.length > 0) {
+                const allergiesToInsert = allergies.map(a => ({
+                    prescription_id: prescriptionId,
+                    allergy: a
+                }));
+                await supabase.from('allergies').insert(allergiesToInsert);
+            }
+
+            return { success: true, code: accessCode };
+        } catch (error: any) {
+            console.error("Error saving prescription:", error);
+            alert(`Failed to save prescription: ${error.message}`);
+            return { success: false };
+        }
     };
 
     // Calculate BMI automatically
@@ -189,16 +459,12 @@ export default function PrescriptionPage() {
         setShowMoreInfo(false);
     };
 
-    // Save patient data
-    const handleSave = () => {
-        /**
-         * TODO: BACKEND INTEGRATION
-         * - Validate required fields
-         * - Save patient data to database
-         * - Show success message
-         */
-        console.log("Saving patient data:", patientData, "BMI:", bmi);
-        alert("Patient information saved! (placeholder)");
+    // Save patient data to Supabase
+    const handleSave = async () => {
+        const patient = await savePatientInternal();
+        if (patient) {
+            alert("Patient information saved successfully!");
+        }
     };
 
     // Add new prescription tab
@@ -247,14 +513,17 @@ export default function PrescriptionPage() {
             setCurrentMedication(getInitialMedication());
             setShowMedInstructions(false);
         } else {
-            // Add new medication - keep form values for next entry
+            // Add new medication
             const newMedication: Medication = {
                 id: nextMedId,
                 ...currentMedication,
             };
             setMedications((prev) => [...prev, newMedication]);
             setNextMedId((prev) => prev + 1);
-            // Form values remain - user can manually edit or clear
+
+            // Clear form automatically
+            setCurrentMedication(getInitialMedication());
+            setShowMedInstructions(false);
         }
     };
 
@@ -290,10 +559,10 @@ export default function PrescriptionPage() {
     };
 
     return (
-        <div>
-            {/* Prescription Tabs - Like IDE file tabs - Sticky at very top */}
+        <div className="h-full flex flex-col overflow-hidden">
+            {/* Prescription Tabs - Like IDE file tabs - Fixed at top */}
             <div
-                className="sticky top-0 z-10 flex items-center gap-1 py-3 border-b overflow-x-auto -mx-8 px-8"
+                className="flex items-center gap-1 py-3 border-b overflow-x-auto -mx-8 px-8 flex-shrink-0"
                 style={{ borderColor: "var(--card-border)", backgroundColor: "var(--background)" }}
             >
                 {prescriptions.map((prescription) => (
@@ -363,13 +632,13 @@ export default function PrescriptionPage() {
                 </button>
             </div>
 
-            {/* Main Grid Layout */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
+            {/* Main Grid Layout - Takes remaining height */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4 flex-1 min-h-0 overflow-hidden">
                 {/* Left Column - Main Content (2/3 width) */}
-                <div className="lg:col-span-2 space-y-4">
-                    {/* Patient Information Card */}
+                <div className="lg:col-span-2 flex flex-col gap-4 overflow-hidden">
+                    {/* Patient Information Card - Fixed size */}
                     <div
-                        className="rounded-xl"
+                        className="rounded-xl flex-shrink-0"
                         style={{
                             backgroundColor: "var(--card-bg)",
                             border: "1px solid var(--card-border)",
@@ -422,18 +691,53 @@ export default function PrescriptionPage() {
                                     >
                                         Patient Name *
                                     </label>
-                                    <input
-                                        type="text"
-                                        value={patientData.name}
-                                        onChange={(e) => handlePatientChange("name", e.target.value)}
-                                        placeholder="Full name"
-                                        className="w-full px-3 py-2 rounded-lg text-sm outline-none transition-all"
-                                        style={{
-                                            backgroundColor: "var(--input-bg)",
-                                            border: "1px solid var(--input-border)",
-                                            color: "var(--foreground)",
-                                        }}
-                                    />
+                                    <div className="relative">
+                                        <input
+                                            type="text"
+                                            value={patientData.name}
+                                            onChange={(e) => {
+                                                handlePatientChange("name", e.target.value);
+                                                setShowResults(true);
+                                            }}
+                                            onFocus={() => setShowResults(true)}
+                                            onBlur={() => setTimeout(() => setShowResults(false), 200)}
+                                            placeholder="Search patient..."
+                                            className="w-full px-3 py-2 rounded-lg text-sm outline-none transition-all"
+                                            style={{
+                                                backgroundColor: "var(--input-bg)",
+                                                border: "1px solid var(--input-border)",
+                                                color: "var(--foreground)",
+                                            }}
+                                            autoComplete="off"
+                                        />
+                                        {showResults && searchResults.length > 0 && (
+                                            <ul
+                                                className="absolute z-50 w-full mt-1 max-h-48 overflow-y-auto rounded-lg shadow-lg border"
+                                                style={{
+                                                    backgroundColor: "var(--card-bg)",
+                                                    borderColor: "var(--card-border)",
+                                                }}
+                                            >
+                                                {searchResults.map((p) => (
+                                                    <li
+                                                        key={p.id}
+                                                        onClick={() => selectPatient(p)}
+                                                        className="px-3 py-2 text-sm cursor-pointer hover:opacity-80 transition-colors border-b last:border-0"
+                                                        style={{
+                                                            color: "var(--foreground)",
+                                                            borderColor: "var(--card-border)"
+                                                        }}
+                                                    >
+                                                        <div className="font-medium">{p.name}</div>
+                                                        <div className="text-xs opacity-60">
+                                                            {p.id_number ? `${p.id_number} • ` : ""}
+                                                            {p.phone || ""}
+                                                        </div>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
                                 </div>
                                 <div>
                                     <label
@@ -697,13 +1001,12 @@ export default function PrescriptionPage() {
                         </div>
                     </div>
 
-                    {/* Medication Section - Takes remaining height */}
+                    {/* Medication Section - Takes remaining height with scrollable list */}
                     <div
-                        className="rounded-xl overflow-hidden flex flex-col flex-1"
+                        className="rounded-xl overflow-hidden flex flex-col flex-1 min-h-0"
                         style={{
                             backgroundColor: "var(--card-bg)",
                             border: "1px solid var(--card-border)",
-                            minHeight: "200px",
                         }}
                     >
                         {/* Add Medication Form - Fixed at top */}
@@ -853,12 +1156,21 @@ export default function PrescriptionPage() {
                             </div>
                         </div>
 
-                        {/* Medication List - Scrollable */}
-                        <div className="flex-1 overflow-y-auto p-2">
+                        {/* Medication List - Scrollable with fixed minimum height */}
+                        <div
+                            className="flex-1 overflow-y-auto p-2"
+                            style={{ minHeight: "150px" }}
+                        >
                             {medications.length === 0 ? (
                                 <div
                                     className="p-4 rounded text-center h-full flex items-center justify-center"
-                                    style={{ color: "var(--muted)" }}
+                                    style={{
+                                        color: "var(--muted)",
+                                        backgroundColor: "var(--background)",
+                                        border: "1px dashed var(--card-border)",
+                                        borderRadius: "8px",
+                                        minHeight: "120px"
+                                    }}
                                 >
                                     <p className="text-xs">No medications added yet</p>
                                 </div>
@@ -959,11 +1271,11 @@ export default function PrescriptionPage() {
                     </div>
                 </div>
 
-                {/* Right Column - Sidebar-like (1/3 width) */}
-                <div className="space-y-6">
-                    {/* Prescription Enhancers Card - Tabbed */}
+                {/* Right Column - Sidebar-like (1/3 width) - Fixed layout */}
+                <div className="flex flex-col gap-4 overflow-hidden">
+                    {/* Prescription Enhancers Card - Tabbed - Fills available space */}
                     <div
-                        className="rounded-xl overflow-hidden"
+                        className="rounded-xl overflow-hidden flex-1"
                         style={{
                             backgroundColor: "var(--card-bg)",
                             border: "1px solid var(--card-border)",
@@ -1190,9 +1502,9 @@ export default function PrescriptionPage() {
                         </div>
                     </div>
 
-                    {/* Print & Export Actions Card */}
+                    {/* Print & Export Actions Card - Fixed at bottom */}
                     <div
-                        className="rounded-xl p-6"
+                        className="rounded-xl p-4 flex-shrink-0"
                         style={{
                             backgroundColor: "var(--card-bg)",
                             border: "1px solid var(--card-border)",
@@ -1207,30 +1519,7 @@ export default function PrescriptionPage() {
 
                         <div className="space-y-3">
                             {/* Print Button */}
-                            <button
-                                onClick={handlePrint}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-medium transition-all hover:opacity-90"
-                                style={{
-                                    backgroundColor: "var(--primary)",
-                                    color: "var(--background)",
-                                }}
-                            >
-                                <svg
-                                    width="18"
-                                    height="18"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                >
-                                    <polyline points="6 9 6 2 18 2 18 9" />
-                                    <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
-                                    <rect x="6" y="14" width="12" height="8" />
-                                </svg>
-                                Print Prescription
-                            </button>
+
 
                             {/* Export as PDF Button */}
                             <button
@@ -1290,6 +1579,41 @@ export default function PrescriptionPage() {
                     </div>
                 </div>
             </div>
-        </div >
+            {/* Hidden Print Area - Portal to Body */}
+            {mounted && printData && createPortal(
+                <div id="print-area">
+                    <style jsx global>{`
+                        @media print {
+                            body > *:not(#print-area) {
+                                display: none !important;
+                            }
+                            body > #print-area {
+                                display: block !important;
+                                position: absolute !important;
+                                top: 0 !important;
+                                left: 0 !important;
+                                width: 100% !important;
+                                height: 100% !important;
+                                margin: 0 !important;
+                                padding: 0 !important;
+                                overflow: visible !important;
+                                background: white;
+                                z-index: 99999;
+                            }
+                            @page {
+                                size: ${prescriptionSettings?.pageSize === "A4" ? "A4" : "Letter"};
+                                margin: 0;
+                            }
+                        }
+                    `}</style>
+                    <PrescriptionRenderer
+                        data={printData}
+                        settings={prescriptionSettings || getDefaultSettings()}
+                        scale={1}
+                    />
+                </div>,
+                document.body
+            )}
+        </div>
     );
 }

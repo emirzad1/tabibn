@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { supabase } from "@/lib/supabase";
 
 /**
  * PREMIUM DASHBOARD PAGE
@@ -10,75 +12,23 @@ import Link from "next/link";
  * - Stats cards with gradient icons
  * - Quick actions row
  * - Two-column layout: Activity + Tips
- * - Recent prescriptions list
+ * - Recent prescriptions list (fetched from database)
  */
 
-// Mock data
-const stats = [
-    {
-        label: "Total Patients",
-        value: "156",
-        change: "+12 this month",
-        color: "#0d9488",
-        icon: (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                <circle cx="9" cy="7" r="4" />
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-            </svg>
-        ),
-    },
-    {
-        label: "Today's Prescriptions",
-        value: "8",
-        change: "3 pending",
-        color: "#22c55e",
-        icon: (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-                <line x1="16" y1="13" x2="8" y2="13" />
-                <line x1="16" y1="17" x2="8" y2="17" />
-            </svg>
-        ),
-    },
-    {
-        label: "This Week",
-        value: "42",
-        change: "+15% from last week",
-        color: "#3b82f6",
-        icon: (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                <line x1="16" y1="2" x2="16" y2="6" />
-                <line x1="8" y1="2" x2="8" y2="6" />
-                <line x1="3" y1="10" x2="21" y2="10" />
-            </svg>
-        ),
-    },
-    {
-        label: "This Month",
-        value: "187",
-        change: "Target: 200",
-        color: "#a855f7",
-        icon: (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="12" y1="20" x2="12" y2="10" />
-                <line x1="18" y1="20" x2="18" y2="4" />
-                <line x1="6" y1="20" x2="6" y2="16" />
-            </svg>
-        ),
-    },
-];
+interface DashboardStats {
+    totalPatients: number;
+    todayPrescriptions: number;
+    weekPrescriptions: number;
+    monthPrescriptions: number;
+}
 
-const recentActivity = [
-    { id: 1, patient: "Ahmad Khan", action: "Prescription created", meds: 3, time: "10 min ago", status: "completed" },
-    { id: 2, patient: "Fatima Ahmadi", action: "Prescription created", meds: 2, time: "1 hour ago", status: "completed" },
-    { id: 3, patient: "Mohammad Rahimi", action: "Prescription updated", meds: 4, time: "2 hours ago", status: "updated" },
-    { id: 4, patient: "Zahra Karimi", action: "Prescription created", meds: 1, time: "Yesterday", status: "completed" },
-    { id: 5, patient: "Ali Mohammadi", action: "Prescription printed", meds: 5, time: "Yesterday", status: "printed" },
-];
+interface RecentActivity {
+    id: string;
+    patient_name: string;
+    medications_count: number;
+    created_at: string;
+    status: string;
+}
 
 const tips = [
     "💡 Use templates to speed up common prescriptions",
@@ -88,12 +38,131 @@ const tips = [
 ];
 
 export default function DashboardPage() {
+    const [stats, setStats] = useState<DashboardStats>({
+        totalPatients: 0,
+        todayPrescriptions: 0,
+        weekPrescriptions: 0,
+        monthPrescriptions: 0,
+    });
+    const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
+    const [doctorName, setDoctorName] = useState("Doctor");
+    const [isLoading, setIsLoading] = useState(true);
+
+    useEffect(() => {
+        fetchDashboardData();
+    }, []);
+
+    const fetchDashboardData = async () => {
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            // Fetch doctor profile
+            const { data: profile } = await supabase
+                .from('doctor_profiles')
+                .select('full_name')
+                .eq('user_id', user.id)
+                .single();
+
+            if (profile) {
+                setDoctorName(profile.full_name);
+            }
+
+            // Fetch total patients
+            const { count: patientsCount } = await supabase
+                .from('patients')
+                .select('*', { count: 'exact', head: true })
+                .eq('user_id', user.id);
+
+            // Fetch prescriptions for stats
+            const { data: prescriptions } = await supabase
+                .from('prescriptions')
+                .select('created_at, status')
+                .eq('user_id', user.id);
+
+            const now = new Date();
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+            const todayCount = prescriptions?.filter(p =>
+                new Date(p.created_at) >= today
+            ).length || 0;
+
+            const weekCount = prescriptions?.filter(p =>
+                new Date(p.created_at) >= weekAgo
+            ).length || 0;
+
+            const monthCount = prescriptions?.filter(p =>
+                new Date(p.created_at) >= monthStart
+            ).length || 0;
+
+            setStats({
+                totalPatients: patientsCount || 0,
+                todayPrescriptions: todayCount,
+                weekPrescriptions: weekCount,
+                monthPrescriptions: monthCount,
+            });
+
+            // Fetch recent activity
+            const { data: recentPrescriptions } = await supabase
+                .from('prescriptions')
+                .select(`
+                    id,
+                    patient_name,
+                    created_at,
+                    status,
+                    medications (id)
+                `)
+                .eq('user_id', user.id)
+                .order('created_at', { ascending: false })
+                .limit(5);
+
+            if (recentPrescriptions) {
+                const activity = recentPrescriptions.map(p => ({
+                    id: p.id,
+                    patient_name: p.patient_name,
+                    medications_count: p.medications?.length || 0,
+                    created_at: p.created_at,
+                    status: p.status?.toLowerCase() || 'draft',
+                }));
+                setRecentActivity(activity);
+            }
+
+            setIsLoading(false);
+        } catch (error) {
+            console.error('Error fetching dashboard data:', error);
+            setIsLoading(false);
+        }
+    };
+
+    const formatTimeAgo = (dateString: string) => {
+        const date = new Date(dateString);
+        const now = new Date();
+        const diffMs = now.getTime() - date.getTime();
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+
+        if (diffMins < 60) return `${diffMins} min ago`;
+        if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+        if (diffDays === 1) return 'Yesterday';
+        return `${diffDays} days ago`;
+    };
+
     const today = new Date().toLocaleDateString("en-US", {
         weekday: "long",
         year: "numeric",
         month: "long",
         day: "numeric",
     });
+
+    const getGreeting = () => {
+        const hour = new Date().getHours();
+        if (hour < 12) return "Good morning";
+        if (hour < 18) return "Good afternoon";
+        return "Good evening";
+    };
 
     return (
         <div className="animate-fade-in">
@@ -103,14 +172,70 @@ export default function DashboardPage() {
                     className="text-3xl font-bold mb-1"
                     style={{ color: "var(--foreground)" }}
                 >
-                    Good morning, Doctor 👋
+                    {getGreeting()}, Dr. {doctorName} 👋
                 </h1>
                 <p style={{ color: "var(--muted)" }}>{today}</p>
             </div>
 
             {/* Stats Cards */}
             <div className="grid grid-cols-4 gap-5 mb-8">
-                {stats.map((stat, idx) => (
+                {[
+                    {
+                        label: "Total Patients",
+                        value: stats.totalPatients.toString(),
+                        change: stats.totalPatients > 0 ? "Active patients" : "No patients yet",
+                        color: "#0d9488",
+                        icon: (
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                                <circle cx="9" cy="7" r="4" />
+                                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                            </svg>
+                        ),
+                    },
+                    {
+                        label: "Today's Prescriptions",
+                        value: stats.todayPrescriptions.toString(),
+                        change: stats.todayPrescriptions > 0 ? "Created today" : "None today",
+                        color: "#22c55e",
+                        icon: (
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                <polyline points="14 2 14 8 20 8" />
+                                <line x1="16" y1="13" x2="8" y2="13" />
+                                <line x1="16" y1="17" x2="8" y2="17" />
+                            </svg>
+                        ),
+                    },
+                    {
+                        label: "This Week",
+                        value: stats.weekPrescriptions.toString(),
+                        change: stats.weekPrescriptions > 0 ? "Last 7 days" : "None this week",
+                        color: "#3b82f6",
+                        icon: (
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                                <line x1="16" y1="2" x2="16" y2="6" />
+                                <line x1="8" y1="2" x2="8" y2="6" />
+                                <line x1="3" y1="10" x2="21" y2="10" />
+                            </svg>
+                        ),
+                    },
+                    {
+                        label: "This Month",
+                        value: stats.monthPrescriptions.toString(),
+                        change: stats.monthPrescriptions > 0 ? "This month" : "None this month",
+                        color: "#a855f7",
+                        icon: (
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <line x1="12" y1="20" x2="12" y2="10" />
+                                <line x1="18" y1="20" x2="18" y2="4" />
+                                <line x1="6" y1="20" x2="6" y2="16" />
+                            </svg>
+                        ),
+                    },
+                ].map((stat, idx) => (
                     <div
                         key={idx}
                         className="p-5 rounded-2xl transition-all hover:scale-[1.02]"
@@ -240,53 +365,62 @@ export default function DashboardPage() {
                         </Link>
                     </div>
                     <div>
-                        {recentActivity.map((item, idx) => (
-                            <div
-                                key={item.id}
-                                className={`p-4 flex items-center justify-between ${idx < recentActivity.length - 1 ? "border-b" : ""
-                                    }`}
-                                style={{ borderColor: "var(--card-border)" }}
-                            >
-                                <div className="flex items-center gap-4">
-                                    <div
-                                        className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold"
-                                        style={{
-                                            background: "var(--primary-subtle)",
-                                            color: "var(--primary)",
-                                        }}
-                                    >
-                                        {item.patient.split(" ").map(n => n[0]).join("")}
-                                    </div>
-                                    <div>
-                                        <p
-                                            className="font-medium"
-                                            style={{ color: "var(--foreground)" }}
-                                        >
-                                            {item.patient}
-                                        </p>
-                                        <p className="text-sm" style={{ color: "var(--muted)" }}>
-                                            {item.action} • {item.meds} medication{item.meds > 1 ? "s" : ""}
-                                        </p>
-                                    </div>
-                                </div>
-                                <div className="text-right">
-                                    <p className="text-xs" style={{ color: "var(--muted)" }}>
-                                        {item.time}
-                                    </p>
-                                    <span
-                                        className="inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-medium"
-                                        style={{
-                                            background: item.status === "completed" ? "#dcfce7" :
-                                                item.status === "printed" ? "#dbeafe" : "#fef3c7",
-                                            color: item.status === "completed" ? "#16a34a" :
-                                                item.status === "printed" ? "#2563eb" : "#d97706",
-                                        }}
-                                    >
-                                        {item.status}
-                                    </span>
-                                </div>
+                        {recentActivity.length === 0 ? (
+                            <div className="p-12 text-center">
+                                <p style={{ color: "var(--muted)" }}>No recent activity</p>
+                                <p className="text-sm mt-2" style={{ color: "var(--muted)" }}>
+                                    Create your first prescription to see activity here
+                                </p>
                             </div>
-                        ))}
+                        ) : (
+                            recentActivity.map((item, idx) => (
+                                <div
+                                    key={item.id}
+                                    className={`p-4 flex items-center justify-between ${idx < recentActivity.length - 1 ? "border-b" : ""
+                                        }`}
+                                    style={{ borderColor: "var(--card-border)" }}
+                                >
+                                    <div className="flex items-center gap-4">
+                                        <div
+                                            className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold"
+                                            style={{
+                                                background: "var(--primary-subtle)",
+                                                color: "var(--primary)",
+                                            }}
+                                        >
+                                            {item.patient_name.split(" ").map((n: string) => n[0]).join("")}
+                                        </div>
+                                        <div>
+                                            <p
+                                                className="font-medium"
+                                                style={{ color: "var(--foreground)" }}
+                                            >
+                                                {item.patient_name}
+                                            </p>
+                                            <p className="text-sm" style={{ color: "var(--muted)" }}>
+                                                Prescription created • {item.medications_count} medication{item.medications_count > 1 ? "s" : ""}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-xs" style={{ color: "var(--muted)" }}>
+                                            {formatTimeAgo(item.created_at)}
+                                        </p>
+                                        <span
+                                            className="inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-medium"
+                                            style={{
+                                                background: item.status === "completed" || item.status === "printed" ? "#dcfce7" :
+                                                    item.status === "draft" ? "#fef3c7" : "#dbeafe",
+                                                color: item.status === "completed" || item.status === "printed" ? "#16a34a" :
+                                                    item.status === "draft" ? "#d97706" : "#2563eb",
+                                            }}
+                                        >
+                                            {item.status}
+                                        </span>
+                                    </div>
+                                </div>
+                            ))
+                        )}
                     </div>
                 </div>
 

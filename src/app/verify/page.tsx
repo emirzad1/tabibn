@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTheme } from "@/components/ThemeProvider";
+import { supabase } from "@/lib/supabase";
 
 /**
  * ENHANCED OTP VERIFICATION PAGE
@@ -86,18 +87,33 @@ function OTPContent() {
         setIsVerifying(true);
         setError("");
 
-        // TODO: Verify OTP via API
-        await new Promise((r) => setTimeout(r, 1000));
+        try {
+            const { error: verifyError } = await supabase.auth.verifyOtp({
+                phone: phone,
+                token: code,
+                type: 'sms'
+            });
 
-        // Simulate verification (accept any 6-digit code for demo)
-        if (code === "000000") {
-            setError("Invalid verification code");
+            if (verifyError) {
+                setError(verifyError.message || "Invalid verification code");
+                setIsVerifying(false);
+                return;
+            }
+
+            // Check if this is signup mode
+            const mode = searchParams.get("mode");
+            if (mode === "signup") {
+                // Redirect back to landing page with verified phone
+                router.push(`/?verified_phone=${encodeURIComponent(phone)}`);
+            } else {
+                // Determine destination
+                router.push("/dashboard");
+            }
+        } catch (err) {
+            console.error(err);
+            setError("Verification failed");
             setIsVerifying(false);
-            // Shake animation handled by CSS
-            return;
         }
-
-        router.push("/setup");
     };
 
     // Resend OTP
@@ -107,7 +123,17 @@ function OTPContent() {
         setCountdown(60);
         setOtp(["", "", "", "", "", ""]);
         inputRefs.current[0]?.focus();
-        // TODO: Resend OTP via API
+
+        try {
+            const { error: resendError } = await supabase.auth.signInWithOtp({
+                phone: phone
+            });
+            if (resendError) {
+                alert("Failed to resend code: " + resendError.message);
+            }
+        } catch (err) {
+            console.error("Resend error:", err);
+        }
     };
 
     return (
@@ -265,7 +291,7 @@ function OTPContent() {
                         className="w-full mt-4 py-2 text-sm transition-all hover:opacity-80"
                         style={{ color: "var(--muted)" }}
                     >
-                        ← Change phone number
+                        ← Back to signup
                     </button>
                 </div>
             </div>

@@ -1,454 +1,471 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "@/components/ThemeProvider";
-
-/**
- * PREMIUM PROFILE/SETTINGS PAGE
- * 
- * Sections:
- * - Profile card with photo and info
- * - Practice details
- * - Preferences (theme, etc.)
- * - Account actions
- */
+import { supabase } from "@/lib/supabase";
+import { useProfile } from "@/contexts/ProfileContext";
 
 export default function ProfilePage() {
     const router = useRouter();
-    const { theme, toggleTheme } = useTheme();
+    const { theme } = useTheme();
+    const { profile, refreshProfile } = useProfile();
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const [profile, setProfile] = useState({
-        photo: null as string | null,
-        name: "Dr. Nawi Safi",
-        email: "dr.nawi@clinic.com",
-        phone: "+93 700 123 456",
-        specialty: "General Practice",
-        licenseNumber: "MD-12345",
-        clinicName: "Kabul Medical Center",
-        clinicAddress: "District 4, Main Road, Kabul",
-        clinicPhone: "+93 20 123 4567",
+    // Form States
+    const [formData, setFormData] = useState({
+        full_name: "",
+        specialty: "",
+        license_number: "",
+        clinic_name: "",
+        clinic_address: "",
+        clinic_phone: "",
     });
 
-    const [isEditing, setIsEditing] = useState(false);
-    const [editData, setEditData] = useState({ ...profile });
-    const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+    const [passwordData, setPasswordData] = useState({
+        oldPassword: "",
+        newPassword: "",
+        confirmPassword: "",
+    });
 
-    const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // UI States
+    const [isEditing, setIsEditing] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
+    const [isChangingPassword, setIsChangingPassword] = useState(false);
+    const [passwordError, setPasswordError] = useState("");
+    const [passwordSuccess, setPasswordSuccess] = useState("");
+
+    // Initialize form with profile data
+    useEffect(() => {
+        if (profile) {
+            setFormData({
+                full_name: profile.full_name || "",
+                specialty: profile.specialty || "",
+                license_number: profile.license_number || "",
+                clinic_name: profile.clinic_name || "",
+                clinic_address: profile.clinic_address || "",
+                clinic_phone: profile.clinic_phone || "",
+            });
+        }
+    }, [profile]);
+
+    const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                setEditData((prev) => ({ ...prev, photo: reader.result as string }));
-            };
-            reader.readAsDataURL(file);
+        if (!file || !profile) return;
+
+        try {
+            // Upload to Supabase Storage
+            const fileExt = file.name.split('.').pop();
+            const fileName = `${profile.user_id}/${Math.random()}.${fileExt}`;
+            const { error: uploadError } = await supabase.storage
+                .from('avatars')
+                .upload(fileName, file);
+
+            if (uploadError) throw uploadError;
+
+            // Get Public URL
+            const { data: { publicUrl } } = supabase.storage
+                .from('avatars')
+                .getPublicUrl(fileName);
+
+            // Update Profile
+            const { error: updateError } = await supabase
+                .from('doctor_profiles')
+                .update({ photo_url: publicUrl })
+                .eq('user_id', profile.user_id);
+
+            if (updateError) throw updateError;
+
+            await refreshProfile();
+        } catch (error) {
+            console.error('Error updating photo:', error);
+            alert("Error updating photo");
         }
     };
 
-    const handleSave = () => {
-        setProfile(editData);
-        setIsEditing(false);
+    const handleSavedProfile = async () => {
+        if (!profile) return;
+        setIsSaving(true);
+        try {
+            const { error } = await supabase
+                .from('doctor_profiles')
+                .update({
+                    full_name: formData.full_name,
+                    specialty: formData.specialty,
+                    license_number: formData.license_number,
+                    clinic_name: formData.clinic_name,
+                    clinic_address: formData.clinic_address,
+                    clinic_phone: formData.clinic_phone,
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('user_id', profile.user_id);
+
+            if (error) throw error;
+
+            await refreshProfile();
+            setIsEditing(false);
+        } catch (error) {
+            console.error('Error saving profile:', error);
+            alert("Failed to save changes");
+        } finally {
+            setIsSaving(false);
+        }
     };
 
-    const handleLogout = () => {
-        router.push("/");
+    const handleChangePassword = async () => {
+        setPasswordError("");
+        setPasswordSuccess("");
+
+        if (passwordData.newPassword !== passwordData.confirmPassword) {
+            setPasswordError("New passwords do not match");
+            return;
+        }
+
+        if (passwordData.newPassword.length < 6) {
+            setPasswordError("Password must be at least 6 characters");
+            return;
+        }
+
+        setIsChangingPassword(true);
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user || !user.email) throw new Error("No user found");
+
+            // Verify old password by signing in
+            const { error: signInError } = await supabase.auth.signInWithPassword({
+                email: user.email,
+                password: passwordData.oldPassword,
+            });
+
+            if (signInError) {
+                setPasswordError("Incorrect old password");
+                return;
+            }
+
+            // Update password
+            const { error: updateError } = await supabase.auth.updateUser({
+                password: passwordData.newPassword
+            });
+
+            if (updateError) throw updateError;
+
+            setPasswordSuccess("Password updated successfully");
+            setPasswordData({ oldPassword: "", newPassword: "", confirmPassword: "" });
+        } catch (error: any) {
+            console.error('Error changing password:', error);
+            setPasswordError(error.message || "Failed to update password");
+        } finally {
+            setIsChangingPassword(false);
+        }
     };
+
+    const handleForgotPassword = async () => {
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user || !user.email) return;
+
+            const { error } = await supabase.auth.resetPasswordForEmail(user.email, {
+                redirectTo: `${window.location.origin}/dashboard/profile`,
+            });
+
+            if (error) throw error;
+            alert(`Password reset email sent to ${user.email}`);
+        } catch (error: any) {
+            console.error("Reset password error:", error);
+            alert("Error sending reset email");
+        }
+    };
+
+    if (!profile) return null;
 
     return (
-        <div className="animate-fade-in max-w-4xl mx-auto">
+        <div className="max-w-4xl mx-auto space-y-8 pb-10">
             {/* Header */}
-            <div className="mb-8">
-                <h1 className="text-2xl font-bold" style={{ color: "var(--foreground)" }}>
-                    Settings
-                </h1>
-                <p style={{ color: "var(--muted)" }}>
-                    Manage your profile and preferences
-                </p>
+            <div>
+                <h1 className="text-2xl font-bold" style={{ color: "var(--foreground)" }}>Settings</h1>
+                <p style={{ color: "var(--muted)" }}>Manage your profile and preferences</p>
             </div>
 
             {/* Profile Card */}
             <div
-                className="rounded-2xl overflow-hidden mb-6"
+                className="rounded-2xl border overflow-hidden"
                 style={{
-                    background: "var(--card-bg)",
-                    border: "1px solid var(--card-border)",
+                    backgroundColor: "var(--card-bg)",
+                    borderColor: "var(--card-border)",
                 }}
             >
+                {/* Banner */}
                 <div
-                    className="h-24"
+                    className="h-32 w-full relative"
                     style={{ background: "var(--gradient-primary)" }}
                 />
-                <div className="px-6 pb-6">
-                    <div className="flex items-end gap-4 -mt-12">
-                        <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={handlePhotoChange}
-                        />
+
+                {/* Profile Info */}
+                <div className="px-8 pb-8">
+                    <div className="relative flex justify-between items-end -mt-12 mb-6">
+                        <div className="relative group">
+                            <div
+                                className="w-24 h-24 rounded-2xl border-4 overflow-hidden flex items-center justify-center cursor-pointer"
+                                style={{
+                                    borderColor: "var(--card-bg)",
+                                    backgroundColor: "var(--background-secondary)",
+                                }}
+                                onClick={() => isEditing && fileInputRef.current?.click()}
+                            >
+                                {profile.photo_url ? (
+                                    <img
+                                        src={profile.photo_url}
+                                        alt="Profile"
+                                        className="w-full h-full object-cover"
+                                    />
+                                ) : (
+                                    <svg
+                                        className="w-10 h-10"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="1.5"
+                                        style={{ color: "var(--muted)" }}
+                                    >
+                                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                                        <circle cx="12" cy="7" r="4" />
+                                    </svg>
+                                )}
+                                {isEditing && (
+                                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                                            <circle cx="12" cy="13" r="4" />
+                                        </svg>
+                                    </div>
+                                )}
+                            </div>
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={handlePhotoChange}
+                                disabled={!isEditing}
+                            />
+                        </div>
                         <button
-                            onClick={() => isEditing && fileInputRef.current?.click()}
-                            className="w-24 h-24 rounded-2xl flex items-center justify-center overflow-hidden border-4 transition-all"
-                            style={{
-                                background: editData.photo || profile.photo
-                                    ? "transparent"
-                                    : "var(--primary-subtle)",
-                                borderColor: "var(--card-bg)",
+                            onClick={() => isEditing ? handleSavedProfile() : setIsEditing(true)}
+                            disabled={isSaving}
+                            className={`px-6 py-2 rounded-xl font-medium transition-all ${isEditing
+                                    ? "text-white shadow-lg hover:shadow-xl hover:opacity-90"
+                                    : "border hover:bg-gray-50 dark:hover:bg-white/5"
+                                }`}
+                            style={isEditing ? {
+                                background: "var(--gradient-primary)",
+                            } : {
+                                borderColor: "var(--border)",
+                                color: "var(--foreground)",
                             }}
-                            disabled={!isEditing}
                         >
-                            {editData.photo || profile.photo ? (
-                                <img
-                                    src={editData.photo || profile.photo || ""}
-                                    alt="Profile"
-                                    className="w-full h-full object-cover"
+                            {isSaving ? "Saving..." : isEditing ? "Save Changes" : "Edit Profile"}
+                        </button>
+                    </div>
+
+                    <div className="grid md:grid-cols-2 gap-8">
+                        {/* Personal Info */}
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-semibold" style={{ color: "var(--foreground)" }}>Personal Information</h3>
+
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium mb-1" style={{ color: "var(--muted)" }}>Full Name</label>
+                                    <input
+                                        type="text"
+                                        value={formData.full_name}
+                                        onChange={(e) => setFormData(prev => ({ ...prev, full_name: e.target.value }))}
+                                        disabled={!isEditing}
+                                        className="w-full px-4 py-2 rounded-xl border outline-none disabled:opacity-50"
+                                        style={{
+                                            backgroundColor: "var(--input-bg)",
+                                            borderColor: "var(--input-border)",
+                                            color: "var(--foreground)",
+                                        }}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium mb-1" style={{ color: "var(--muted)" }}>Specialty</label>
+                                    <input
+                                        type="text"
+                                        value={formData.specialty}
+                                        onChange={(e) => setFormData(prev => ({ ...prev, specialty: e.target.value }))}
+                                        disabled={!isEditing}
+                                        placeholder="e.g. Cardiology"
+                                        className="w-full px-4 py-2 rounded-xl border outline-none disabled:opacity-50"
+                                        style={{
+                                            backgroundColor: "var(--input-bg)",
+                                            borderColor: "var(--input-border)",
+                                            color: "var(--foreground)",
+                                        }}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium mb-1" style={{ color: "var(--muted)" }}>License Number</label>
+                                    <input
+                                        type="text"
+                                        value={formData.license_number}
+                                        onChange={(e) => setFormData(prev => ({ ...prev, license_number: e.target.value }))}
+                                        disabled={!isEditing}
+                                        className="w-full px-4 py-2 rounded-xl border outline-none disabled:opacity-50"
+                                        style={{
+                                            backgroundColor: "var(--input-bg)",
+                                            borderColor: "var(--input-border)",
+                                            color: "var(--foreground)",
+                                        }}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Clinic Info */}
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-semibold" style={{ color: "var(--foreground)" }}>Clinic Details</h3>
+
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium mb-1" style={{ color: "var(--muted)" }}>Clinic Name</label>
+                                    <input
+                                        type="text"
+                                        value={formData.clinic_name}
+                                        onChange={(e) => setFormData(prev => ({ ...prev, clinic_name: e.target.value }))}
+                                        disabled={!isEditing}
+                                        className="w-full px-4 py-2 rounded-xl border outline-none disabled:opacity-50"
+                                        style={{
+                                            backgroundColor: "var(--input-bg)",
+                                            borderColor: "var(--input-border)",
+                                            color: "var(--foreground)",
+                                        }}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium mb-1" style={{ color: "var(--muted)" }}>Address</label>
+                                    <input
+                                        type="text"
+                                        value={formData.clinic_address}
+                                        onChange={(e) => setFormData(prev => ({ ...prev, clinic_address: e.target.value }))}
+                                        disabled={!isEditing}
+                                        className="w-full px-4 py-2 rounded-xl border outline-none disabled:opacity-50"
+                                        style={{
+                                            backgroundColor: "var(--input-bg)",
+                                            borderColor: "var(--input-border)",
+                                            color: "var(--foreground)",
+                                        }}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium mb-1" style={{ color: "var(--muted)" }}>Phone</label>
+                                    <input
+                                        type="tel"
+                                        value={formData.clinic_phone}
+                                        onChange={(e) => setFormData(prev => ({ ...prev, clinic_phone: e.target.value }))}
+                                        disabled={!isEditing}
+                                        className="w-full px-4 py-2 rounded-xl border outline-none disabled:opacity-50"
+                                        style={{
+                                            backgroundColor: "var(--input-bg)",
+                                            borderColor: "var(--input-border)",
+                                            color: "var(--foreground)",
+                                        }}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Account Security */}
+            <div
+                className="rounded-2xl border p-8"
+                style={{
+                    backgroundColor: "var(--card-bg)",
+                    borderColor: "var(--card-border)",
+                }}
+            >
+                <h3 className="text-lg font-semibold mb-6" style={{ color: "var(--foreground)" }}>Account Security</h3>
+
+                <div className="space-y-6 max-w-md">
+                    <div>
+                        <h4 className="font-medium mb-4" style={{ color: "var(--foreground)" }}>Change Password</h4>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium mb-1" style={{ color: "var(--muted)" }}>Current Password</label>
+                                <input
+                                    type="password"
+                                    value={passwordData.oldPassword}
+                                    onChange={(e) => setPasswordData(prev => ({ ...prev, oldPassword: e.target.value }))}
+                                    className="w-full px-4 py-2 rounded-xl border outline-none"
+                                    style={{
+                                        backgroundColor: "var(--input-bg)",
+                                        borderColor: "var(--input-border)",
+                                        color: "var(--foreground)",
+                                    }}
                                 />
-                            ) : (
-                                <svg
-                                    width="40"
-                                    height="40"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="var(--primary)"
-                                    strokeWidth="1.5"
-                                >
-                                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                                    <circle cx="12" cy="7" r="4" />
-                                </svg>
-                            )}
-                        </button>
-                        <div className="flex-1 pb-2">
-                            <h2
-                                className="text-xl font-bold"
-                                style={{ color: "var(--foreground)" }}
-                            >
-                                {profile.name}
-                            </h2>
-                            <p style={{ color: "var(--muted)" }}>
-                                {profile.specialty}
-                            </p>
-                        </div>
-                        <button
-                            onClick={() => isEditing ? handleSave() : setIsEditing(true)}
-                            className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all"
-                            style={{
-                                background: isEditing ? "var(--gradient-primary)" : "var(--background-secondary)",
-                                color: isEditing ? "white" : "var(--foreground)",
-                            }}
-                        >
-                            {isEditing ? "Save Changes" : "Edit Profile"}
-                        </button>
-                    </div>
-                </div>
-            </div>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium mb-1" style={{ color: "var(--muted)" }}>New Password</label>
+                                <input
+                                    type="password"
+                                    value={passwordData.newPassword}
+                                    onChange={(e) => setPasswordData(prev => ({ ...prev, newPassword: e.target.value }))}
+                                    className="w-full px-4 py-2 rounded-xl border outline-none"
+                                    style={{
+                                        backgroundColor: "var(--input-bg)",
+                                        borderColor: "var(--input-border)",
+                                        color: "var(--foreground)",
+                                    }}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium mb-1" style={{ color: "var(--muted)" }}>Confirm New Password</label>
+                                <input
+                                    type="password"
+                                    value={passwordData.confirmPassword}
+                                    onChange={(e) => setPasswordData(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                                    className="w-full px-4 py-2 rounded-xl border outline-none"
+                                    style={{
+                                        backgroundColor: "var(--input-bg)",
+                                        borderColor: "var(--input-border)",
+                                        color: "var(--foreground)",
+                                    }}
+                                />
+                            </div>
 
-            {/* Personal Information */}
-            <div
-                className="rounded-2xl p-6 mb-6"
-                style={{
-                    background: "var(--card-bg)",
-                    border: "1px solid var(--card-border)",
-                }}
-            >
-                <h3 className="text-lg font-semibold mb-4" style={{ color: "var(--foreground)" }}>
-                    Personal Information
-                </h3>
-                <div className="grid grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-sm font-medium mb-2" style={{ color: "var(--muted)" }}>
-                            Full Name
-                        </label>
-                        {isEditing ? (
-                            <input
-                                type="text"
-                                value={editData.name}
-                                onChange={(e) => setEditData((p) => ({ ...p, name: e.target.value }))}
-                                className="w-full px-4 py-3 rounded-xl text-sm outline-none"
-                                style={{
-                                    background: "var(--input-bg)",
-                                    border: "1px solid var(--input-border)",
-                                    color: "var(--foreground)",
-                                }}
-                            />
-                        ) : (
-                            <p style={{ color: "var(--foreground)" }}>{profile.name}</p>
-                        )}
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium mb-2" style={{ color: "var(--muted)" }}>
-                            Email
-                        </label>
-                        {isEditing ? (
-                            <input
-                                type="email"
-                                value={editData.email}
-                                onChange={(e) => setEditData((p) => ({ ...p, email: e.target.value }))}
-                                className="w-full px-4 py-3 rounded-xl text-sm outline-none"
-                                style={{
-                                    background: "var(--input-bg)",
-                                    border: "1px solid var(--input-border)",
-                                    color: "var(--foreground)",
-                                }}
-                            />
-                        ) : (
-                            <p style={{ color: "var(--foreground)" }}>{profile.email}</p>
-                        )}
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium mb-2" style={{ color: "var(--muted)" }}>
-                            Phone
-                        </label>
-                        {isEditing ? (
-                            <input
-                                type="tel"
-                                value={editData.phone}
-                                onChange={(e) => setEditData((p) => ({ ...p, phone: e.target.value }))}
-                                className="w-full px-4 py-3 rounded-xl text-sm outline-none"
-                                style={{
-                                    background: "var(--input-bg)",
-                                    border: "1px solid var(--input-border)",
-                                    color: "var(--foreground)",
-                                }}
-                            />
-                        ) : (
-                            <p style={{ color: "var(--foreground)" }}>{profile.phone}</p>
-                        )}
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium mb-2" style={{ color: "var(--muted)" }}>
-                            License Number
-                        </label>
-                        {isEditing ? (
-                            <input
-                                type="text"
-                                value={editData.licenseNumber}
-                                onChange={(e) => setEditData((p) => ({ ...p, licenseNumber: e.target.value }))}
-                                className="w-full px-4 py-3 rounded-xl text-sm outline-none"
-                                style={{
-                                    background: "var(--input-bg)",
-                                    border: "1px solid var(--input-border)",
-                                    color: "var(--foreground)",
-                                }}
-                            />
-                        ) : (
-                            <p style={{ color: "var(--foreground)" }}>{profile.licenseNumber}</p>
-                        )}
-                    </div>
-                </div>
-            </div>
+                            {passwordError && <p className="text-red-500 text-sm">{passwordError}</p>}
+                            {passwordSuccess && <p className="text-green-500 text-sm">{passwordSuccess}</p>}
 
-            {/* Practice Information */}
-            <div
-                className="rounded-2xl p-6 mb-6"
-                style={{
-                    background: "var(--card-bg)",
-                    border: "1px solid var(--card-border)",
-                }}
-            >
-                <h3 className="text-lg font-semibold mb-4" style={{ color: "var(--foreground)" }}>
-                    Practice Information
-                </h3>
-                <div className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium mb-2" style={{ color: "var(--muted)" }}>
-                            Clinic Name
-                        </label>
-                        {isEditing ? (
-                            <input
-                                type="text"
-                                value={editData.clinicName}
-                                onChange={(e) => setEditData((p) => ({ ...p, clinicName: e.target.value }))}
-                                className="w-full px-4 py-3 rounded-xl text-sm outline-none"
-                                style={{
-                                    background: "var(--input-bg)",
-                                    border: "1px solid var(--input-border)",
-                                    color: "var(--foreground)",
-                                }}
-                            />
-                        ) : (
-                            <p style={{ color: "var(--foreground)" }}>{profile.clinicName}</p>
-                        )}
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium mb-2" style={{ color: "var(--muted)" }}>
-                            Address
-                        </label>
-                        {isEditing ? (
-                            <textarea
-                                value={editData.clinicAddress}
-                                onChange={(e) => setEditData((p) => ({ ...p, clinicAddress: e.target.value }))}
-                                rows={2}
-                                className="w-full px-4 py-3 rounded-xl text-sm outline-none resize-none"
-                                style={{
-                                    background: "var(--input-bg)",
-                                    border: "1px solid var(--input-border)",
-                                    color: "var(--foreground)",
-                                }}
-                            />
-                        ) : (
-                            <p style={{ color: "var(--foreground)" }}>{profile.clinicAddress}</p>
-                        )}
-                    </div>
-                </div>
-            </div>
-
-            {/* Preferences */}
-            <div
-                className="rounded-2xl p-6 mb-6"
-                style={{
-                    background: "var(--card-bg)",
-                    border: "1px solid var(--card-border)",
-                }}
-            >
-                <h3 className="text-lg font-semibold mb-4" style={{ color: "var(--foreground)" }}>
-                    Preferences
-                </h3>
-                <div className="space-y-4">
-                    {/* Theme Toggle */}
-                    <div className="flex items-center justify-between py-2">
-                        <div>
-                            <p className="font-medium" style={{ color: "var(--foreground)" }}>
-                                Dark Mode
-                            </p>
-                            <p className="text-sm" style={{ color: "var(--muted)" }}>
-                                Switch between light and dark themes
-                            </p>
-                        </div>
-                        <button
-                            onClick={toggleTheme}
-                            className="w-14 h-8 rounded-full relative transition-all"
-                            style={{
-                                background: theme === "dark" ? "var(--primary)" : "var(--input-border)",
-                            }}
-                        >
-                            <div
-                                className="w-6 h-6 rounded-full absolute top-1 transition-all"
-                                style={{
-                                    background: "white",
-                                    left: theme === "dark" ? "calc(100% - 1.75rem)" : "0.25rem",
-                                }}
-                            />
-                        </button>
-                    </div>
-
-                    {/* Notification Toggle (placeholder) */}
-                    <div className="flex items-center justify-between py-2 border-t" style={{ borderColor: "var(--card-border)" }}>
-                        <div>
-                            <p className="font-medium" style={{ color: "var(--foreground)" }}>
-                                Email Notifications
-                            </p>
-                            <p className="text-sm" style={{ color: "var(--muted)" }}>
-                                Receive updates about your practice
-                            </p>
-                        </div>
-                        <button
-                            className="w-14 h-8 rounded-full relative transition-all"
-                            style={{ background: "var(--primary)" }}
-                        >
-                            <div
-                                className="w-6 h-6 rounded-full absolute top-1"
-                                style={{
-                                    background: "white",
-                                    left: "calc(100% - 1.75rem)",
-                                }}
-                            />
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            {/* Danger Zone */}
-            <div
-                className="rounded-2xl p-6"
-                style={{
-                    background: "var(--card-bg)",
-                    border: "1px solid #fee2e2",
-                }}
-            >
-                <h3 className="text-lg font-semibold mb-4" style={{ color: "#ef4444" }}>
-                    Danger Zone
-                </h3>
-                <div className="flex items-center justify-between">
-                    <div>
-                        <p className="font-medium" style={{ color: "var(--foreground)" }}>
-                            Log out of your account
-                        </p>
-                        <p className="text-sm" style={{ color: "var(--muted)" }}>
-                            You will need to sign in again
-                        </p>
-                    </div>
-                    <button
-                        onClick={() => setShowLogoutConfirm(true)}
-                        className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:opacity-80"
-                        style={{
-                            background: "#fee2e2",
-                            color: "#ef4444",
-                        }}
-                    >
-                        Log Out
-                    </button>
-                </div>
-            </div>
-
-            {/* Logout Confirmation Modal */}
-            {showLogoutConfirm && (
-                <div
-                    className="fixed inset-0 flex items-center justify-center z-50 animate-fade-in"
-                    style={{ background: "rgba(0, 0, 0, 0.5)" }}
-                >
-                    <div
-                        className="w-full max-w-sm rounded-2xl p-6 text-center animate-scale-in"
-                        style={{
-                            background: "var(--card-bg)",
-                            border: "1px solid var(--card-border)",
-                        }}
-                    >
-                        <div
-                            className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
-                            style={{ background: "#fee2e2" }}
-                        >
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
-                                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                                <polyline points="16 17 21 12 16 7" />
-                                <line x1="21" y1="12" x2="9" y2="12" />
-                            </svg>
-                        </div>
-                        <h3
-                            className="text-xl font-bold mb-2"
-                            style={{ color: "var(--foreground)" }}
-                        >
-                            Log Out?
-                        </h3>
-                        <p className="mb-6" style={{ color: "var(--muted)" }}>
-                            Are you sure you want to log out?
-                        </p>
-                        <div className="flex gap-3">
                             <button
-                                onClick={() => setShowLogoutConfirm(false)}
-                                className="flex-1 py-3 rounded-xl font-medium"
-                                style={{
-                                    background: "var(--background-secondary)",
-                                    color: "var(--foreground)",
-                                }}
+                                onClick={handleChangePassword}
+                                disabled={isChangingPassword || !passwordData.oldPassword || !passwordData.newPassword}
+                                className="px-6 py-2 rounded-xl font-medium text-white transition-all hover:shadow-lg disabled:opacity-50 disabled:shadow-none"
+                                style={{ background: "var(--gradient-primary)" }}
                             >
-                                Cancel
+                                {isChangingPassword ? "Updating..." : "Update Password"}
                             </button>
+                        </div>
+                    </div>
+
+                    <div className="pt-6 border-t" style={{ borderColor: "var(--border)" }}>
+                        <div className="flex justify-between items-center">
+                            <div>
+                                <h4 className="font-medium" style={{ color: "var(--foreground)" }}>Forgot Password?</h4>
+                                <p className="text-sm" style={{ color: "var(--muted)" }}>We'll send you a link to reset it.</p>
+                            </div>
                             <button
-                                onClick={handleLogout}
-                                className="flex-1 py-3 rounded-xl font-medium"
-                                style={{
-                                    background: "#ef4444",
-                                    color: "white",
-                                }}
+                                onClick={handleForgotPassword}
+                                className="text-sm font-medium hover:underline"
+                                style={{ color: "var(--primary)" }}
                             >
-                                Log Out
+                                Send Reset Email
                             </button>
                         </div>
                     </div>
                 </div>
-            )}
+            </div>
         </div>
     );
 }

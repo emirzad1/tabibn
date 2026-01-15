@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { supabase } from "@/lib/supabase";
 
 /**
  * PREMIUM HISTORY PAGE
@@ -14,7 +15,7 @@ import { useState } from "react";
  */
 
 interface PrescriptionHistory {
-    id: number;
+    id: string; // UUID
     patientName: string;
     patientId: string;
     date: string;
@@ -23,24 +24,56 @@ interface PrescriptionHistory {
     status: "Printed" | "Draft" | "Sent";
 }
 
-const mockHistory: PrescriptionHistory[] = [
-    { id: 1, patientName: "Ahmad Khan", patientId: "P-001", date: "2026-01-10", diagnosis: "Common cold with mild fever", medications: [{ name: "Paracetamol 500mg", dosage: "1 tablet, 3 times daily" }, { name: "Vitamin C 1000mg", dosage: "1 tablet daily" }, { name: "Cetirizine 10mg", dosage: "1 tablet at bedtime" }], status: "Printed" },
-    { id: 2, patientName: "Fatima Ahmadi", patientId: "P-002", date: "2026-01-09", diagnosis: "Acute gastritis", medications: [{ name: "Omeprazole 20mg", dosage: "1 capsule before breakfast" }, { name: "Antacid syrup", dosage: "10ml after meals" }], status: "Sent" },
-    { id: 3, patientName: "Mohammad Rahimi", patientId: "P-003", date: "2026-01-08", diagnosis: "Hypertension follow-up", medications: [{ name: "Amlodipine 5mg", dosage: "1 tablet daily" }, { name: "Lisinopril 10mg", dosage: "1 tablet daily" }, { name: "Aspirin 75mg", dosage: "1 tablet daily" }, { name: "Atorvastatin 20mg", dosage: "1 tablet at bedtime" }], status: "Printed" },
-    { id: 4, patientName: "Zahra Karimi", patientId: "P-004", date: "2026-01-07", diagnosis: "Urinary tract infection", medications: [{ name: "Ciprofloxacin 500mg", dosage: "1 tablet, twice daily for 7 days" }], status: "Printed" },
-    { id: 5, patientName: "Ali Mohammadi", patientId: "P-005", date: "2026-01-05", diagnosis: "Type 2 Diabetes management", medications: [{ name: "Metformin 500mg", dosage: "1 tablet, twice daily" }, { name: "Glimepiride 2mg", dosage: "1 tablet before breakfast" }, { name: "Vitamin B12", dosage: "1 tablet daily" }], status: "Draft" },
-    { id: 6, patientName: "Sara Hosseini", patientId: "P-007", date: "2026-01-03", diagnosis: "Migraine headache", medications: [{ name: "Sumatriptan 50mg", dosage: "1 tablet at onset" }, { name: "Ibuprofen 400mg", dosage: "As needed" }], status: "Printed" },
-];
 
 const statusFilters = ["All", "Printed", "Sent", "Draft"];
 
 export default function HistoryPage() {
-    const [prescriptions] = useState<PrescriptionHistory[]>(mockHistory);
+    const [prescriptions, setPrescriptions] = useState<PrescriptionHistory[]>([]);
     const [searchQuery, setSearchQuery] = useState("");
     const [dateFrom, setDateFrom] = useState("");
     const [dateTo, setDateTo] = useState("");
     const [statusFilter, setStatusFilter] = useState("All");
-    const [expandedId, setExpandedId] = useState<number | null>(null);
+    const [expandedId, setExpandedId] = useState<string | null>(null);
+
+    useEffect(() => {
+        fetchHistory();
+    }, []);
+
+    const fetchHistory = async () => {
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            const { data, error } = await supabase
+                .from('prescriptions')
+                .select('*, medications(*)')
+                .eq('user_id', user.id)
+                .order('created_at', { ascending: false });
+
+            if (error) {
+                console.error("Error fetching history:", error);
+                return;
+            }
+
+            if (data) {
+                const mapped: PrescriptionHistory[] = data.map((p: any) => ({
+                    id: p.id,
+                    patientName: p.patient_name,
+                    patientId: p.patient_id_number || "",
+                    date: p.date,
+                    diagnosis: p.diagnosis || "",
+                    medications: p.medications ? p.medications.map((m: any) => ({
+                        name: m.name,
+                        dosage: `${m.strength || ""} ${m.frequency || ""}`.trim()
+                    })) : [],
+                    status: p.status
+                }));
+                setPrescriptions(mapped);
+            }
+        } catch (error) {
+            console.error("Error:", error);
+        }
+    };
 
     const filteredPrescriptions = prescriptions.filter((rx) => {
         const matchesSearch =
@@ -63,13 +96,79 @@ export default function HistoryPage() {
     };
 
     const handlePrint = (rx: PrescriptionHistory) => {
-        console.log("Printing:", rx);
-        alert(`Printing prescription for ${rx.patientName}...`);
+        try {
+            // Store prescription data for print page
+            const printData = {
+                patient: {
+                    name: rx.patientName,
+                    idNumber: rx.patientId,
+                    date: rx.date,
+                },
+                medications: rx.medications.map((med, idx) => ({
+                    id: idx + 1,
+                    name: med.name,
+                    strength: "",
+                    frequency: med.dosage,
+                    duration: "",
+                    quantity: "",
+                    instructions: "",
+                })),
+                diagnosis: rx.diagnosis,
+                vitals: {},
+                allergies: [],
+                additionalNotes: "",
+            };
+
+            sessionStorage.setItem("tabibn-prescription-data", JSON.stringify(printData));
+
+            // Open print page in new window
+            window.open("/dashboard/prescription/print", "_blank");
+        } catch (error) {
+            console.error("Print error:", error);
+            alert("Failed to open print page. Please try again.");
+        }
     };
 
-    const handleExport = (rx: PrescriptionHistory) => {
-        console.log("Exporting:", rx);
-        alert(`Exporting prescription for ${rx.patientName} as PDF...`);
+    const handleExport = async (rx: PrescriptionHistory) => {
+        try {
+            // Call PDF generation API
+            const response = await fetch("/api/prescription/pdf", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    patient: {
+                        name: rx.patientName,
+                        idNumber: rx.patientId,
+                        date: rx.date,
+                    },
+                    medications: rx.medications.map((med) => ({
+                        name: med.name,
+                        dosage: med.dosage,
+                    })),
+                    diagnosis: rx.diagnosis,
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error("Failed to generate PDF");
+            }
+
+            // Download PDF
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `prescription_${rx.patientName.replace(/ /g, "_")}_${rx.date}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        } catch (error) {
+            console.error("Export error:", error);
+            alert("Failed to export PDF. Please try again.");
+        }
     };
 
     const clearFilters = () => {

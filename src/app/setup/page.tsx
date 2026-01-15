@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "@/components/ThemeProvider";
+import { supabase } from "@/lib/supabase";
 
 /**
  * MULTI-STEP PROFILE SETUP PAGE
@@ -44,6 +45,7 @@ export default function SetupPage() {
 
     const [step, setStep] = useState(1);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
     const [profile, setProfile] = useState<ProfileData>({
         photo: null,
         fullName: "",
@@ -53,6 +55,41 @@ export default function SetupPage() {
         clinicAddress: "",
         clinicPhone: "",
     });
+
+    // Check authentication on mount
+    useEffect(() => {
+        checkAuth();
+    }, []);
+
+    const checkAuth = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+
+        if (!user) {
+            // Not authenticated, redirect to login
+            router.push("/");
+            return;
+        }
+
+        // Check if profile already exists
+        const { data: existingProfile } = await supabase
+            .from('doctor_profiles')
+            .select('id')
+            .eq('user_id', user.id)
+            .single();
+
+        if (existingProfile) {
+            // Profile already exists, redirect to dashboard
+            router.push("/dashboard");
+            return;
+        }
+
+        // Get user's name from auth metadata
+        if (user.user_metadata?.full_name) {
+            setProfile(prev => ({ ...prev, fullName: user.user_metadata.full_name }));
+        }
+
+        setIsLoading(false);
+    };
 
     // Handle photo upload
     const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -90,9 +127,45 @@ export default function SetupPage() {
     // Complete setup
     const handleComplete = async () => {
         setIsSubmitting(true);
-        // TODO: Save profile to API
-        await new Promise((r) => setTimeout(r, 1000));
-        router.push("/dashboard");
+
+        try {
+            // Get current user
+            const { data: { user } } = await supabase.auth.getUser();
+
+            if (!user) {
+                alert("Authentication error. Please log in again.");
+                router.push("/");
+                return;
+            }
+
+            // Save doctor profile to database
+            const { error } = await supabase
+                .from('doctor_profiles')
+                .insert([{
+                    user_id: user.id,
+                    photo_url: profile.photo, // Base64 for now, can upload to storage later
+                    full_name: profile.fullName,
+                    specialty: profile.specialty,
+                    license_number: profile.licenseNumber || null,
+                    clinic_name: profile.clinicName || null,
+                    clinic_address: profile.clinicAddress || null,
+                    clinic_phone: profile.clinicPhone || null,
+                }]);
+
+            if (error) {
+                console.error('Error saving profile:', error);
+                alert(`Failed to save profile: ${error.message}`);
+                setIsSubmitting(false);
+                return;
+            }
+
+            // Success! Redirect to dashboard
+            router.push("/dashboard");
+        } catch (error) {
+            console.error('Error:', error);
+            alert("An error occurred. Please try again.");
+            setIsSubmitting(false);
+        }
     };
 
     // Check if current step is valid
@@ -108,6 +181,26 @@ export default function SetupPage() {
                 return false;
         }
     };
+
+    // Show loading state while checking auth
+    if (isLoading) {
+        return (
+            <div
+                className="min-h-screen flex items-center justify-center"
+                style={{ background: "var(--gradient-hero)" }}
+            >
+                <div className="text-center">
+                    <div className="w-16 h-16 rounded-full mx-auto mb-4" style={{ background: "var(--gradient-primary)" }}>
+                        <svg className="w-16 h-16 animate-spin" viewBox="0 0 24 24" fill="none">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="white" strokeWidth="4" />
+                            <path className="opacity-75" fill="white" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                    </div>
+                    <p style={{ color: "var(--foreground)" }}>Loading...</p>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div

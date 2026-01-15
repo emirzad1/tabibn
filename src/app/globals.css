@@ -335,4 +335,59 @@ select:focus {
   .no-print {
     display: none !important;
   }
+
+  /* Hide UI elements when printing */
+  nav,
+  aside,
+  header:not(.prescription-header),
+  footer:not(.prescription-footer),
+  button,
+  .sidebar,
+  [data-no-print] {
+    display: none !important;
+  }
+
+  /* Prescription page styling */
+  .prescription-page {
+    transform: scale(1) !important;
+    box-shadow: none !important;
+    margin: 0 !important;
+    padding: 20mm !important;
+  }
+}
+
+/* A4 Print Size */
+@media print {
+  @page {
+    size: A4;
+    margin: 0;
+  }
+}
+
+/* Letter Print Size - use class to toggle */
+@media print {
+  .print-letter {
+    @page {
+      size: letter;
+      margin: 0;
+    }
+  }
+}
+
+/* Print preview container */
+.print-preview-container {
+  background: #1a1a2e;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 40px;
+  overflow: auto;
+}
+
+/* Prescription document styling for preview */
+.prescription-document {
+  background: white;
+  color: black;
+  font-family: 'Times New Roman', Times, serif;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 }
